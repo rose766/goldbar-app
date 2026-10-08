@@ -19,7 +19,7 @@ const navItems = [
   { label: 'Review Queue', href: '/review', icon: Bell },
   { label: 'Daily Summary', href: '/daily-summary', icon: BarChart3 },
   { label: 'Game Plans', href: '/game-plans', icon: FileText },
-  { label: 'Slack Dry Run', href: '/slack-preview', icon: FlaskConical },
+  { label: 'Slack Control Center', href: '/slack-preview', icon: FlaskConical },
 ]
 
 export function Sidebar({ pendingReviews = 0 }: { pendingReviews?: number }) {

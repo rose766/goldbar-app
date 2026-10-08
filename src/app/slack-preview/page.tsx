@@ -4,17 +4,75 @@ import { useEffect, useState, useCallback } from 'react'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
+interface WorkspaceStats {
+  allChannels: number
+  accessibleChannels: number
+  excludedChannels: number
+  ingestionEnabled: number
+  analysisEnabled: number
+  errorChannels: number
+  totalMessages: number
+  pendingProposals: number
+}
+
+interface WorkspaceData {
+  configured: boolean
+  liveSyncEnabled: boolean
+  workspace: {
+    teamId: string
+    teamName: string | null
+    teamDomain: string | null
+    totalChannels: number
+    accessibleChannels: number
+    lastDiscoveredAt: string | null
+    lastSyncAt: string | null
+  } | null
+  stats: WorkspaceStats
+  lastRun: {
+    id: string
+    runDate: string
+    status: string
+    channelName: string | null
+    messagesAnalyzed: number
+    itemsFlaggedForReview: number
+  } | null
+  channelsWithErrors: Array<{
+    slackChannelId: string
+    channelName: string | null
+    lastError: string | null
+    lastSyncAt: string | null
+  }>
+}
+
+interface Channel {
+  id: string
+  slackChannelId: string
+  channelName: string | null
+  channelType: string
+  isPrivate: boolean
+  isArchived: boolean
+  isMember: boolean
+  isAccessible: boolean
+  enabled: boolean
+  ingestionEnabled: boolean
+  analysisEnabled: boolean
+  classification: string
+  cursor: string | null
+  lastSyncAt: string | null
+  lastSuccessfulSyncAt: string | null
+  lastError: string | null
+  messagesAnalyzed: number
+  totalMessages: number
+  updatedAt: string
+}
+
 interface ProposedData {
   title?: string
   description?: string
   nextStep?: string
   owner?: string
-  ownerType?: string
-  deadline?: string | null
   status?: string
   priority?: string
-  blockerDescription?: string
-  completionEvidence?: string
   openItemId?: string
   clientId?: string
   clientName?: string
@@ -43,37 +101,34 @@ interface Proposal {
   createdAt: string
 }
 
-interface LastRun {
-  id: string
-  runDate: string
-  status: string
-  channelName: string | null
-  messagesAnalyzed: number
-  messagesSkipped: number
-  newItemsDetected: number
-  updatesDetected: number
-  completionsDetected: number
-  itemsFlaggedForReview: number
-  errorLog: string | null
-  completedAt: string | null
-}
-
-interface Config {
-  channelId: string | null
-  channelName: string | null
-  cursor: string | null
-  lastSyncAt: string | null
-  isEnabled: boolean
-}
-
-interface PreviewData {
-  lastRun: LastRun | null
-  proposals: Proposal[]
-  reviewedCounts: Record<string, number>
-  config: Config
-}
-
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function rel(d: string | null) {
+  if (!d) return '—'
+  const diff = Date.now() - new Date(d).getTime()
+  const m = Math.floor(diff / 60000)
+  if (m < 1) return 'just now'
+  if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ago`
+  return `${Math.floor(h / 24)}d ago`
+}
+
+function classificationColor(c: string) {
+  const map: Record<string, string> = {
+    CLIENT: 'bg-blue-900 text-blue-300',
+    INTERNAL: 'bg-slate-700 text-slate-300',
+    OPERATIONS: 'bg-violet-900 text-violet-300',
+    STAFFING: 'bg-cyan-900 text-cyan-300',
+    HR: 'bg-pink-900 text-pink-300',
+    LEADERSHIP: 'bg-amber-900 text-amber-300',
+    TRAINING: 'bg-green-900 text-green-300',
+    SOCIAL: 'bg-rose-900 text-rose-300',
+    OTHER: 'bg-slate-700 text-slate-400',
+    EXCLUDED: 'bg-red-950 text-red-400',
+  }
+  return map[c] ?? 'bg-slate-700 text-slate-400'
+}
 
 function confidenceBadge(c: string) {
   if (c === 'HIGH') return <span className="px-2 py-0.5 rounded text-xs font-medium bg-emerald-900 text-emerald-300">HIGH</span>
@@ -81,408 +136,543 @@ function confidenceBadge(c: string) {
   return <span className="px-2 py-0.5 rounded text-xs font-medium bg-red-900 text-red-300">NEEDS REVIEW</span>
 }
 
-function actionBadge(a: string) {
-  const map: Record<string, string> = {
-    CREATE_ITEM: 'bg-blue-900 text-blue-300',
-    UPDATE_ITEM: 'bg-purple-900 text-purple-300',
-    COMPLETE_ITEM: 'bg-emerald-900 text-emerald-300',
-    DEADLINE_CHANGE: 'bg-amber-900 text-amber-300',
-    OWNER_CHANGE: 'bg-indigo-900 text-indigo-300',
-    FLAG_BLOCKER: 'bg-red-900 text-red-300',
-    NEEDS_REVIEW: 'bg-zinc-700 text-zinc-300',
-    INFORMATIONAL: 'bg-zinc-800 text-zinc-400',
-  }
-  return (
-    <span className={`px-2 py-0.5 rounded text-xs font-medium ${map[a] ?? 'bg-zinc-700 text-zinc-300'}`}>
-      {a.replace(/_/g, ' ')}
-    </span>
-  )
-}
+const CLASSIFICATIONS = ['ALL', 'CLIENT', 'INTERNAL', 'OPERATIONS', 'STAFFING', 'HR', 'LEADERSHIP', 'TRAINING', 'SOCIAL', 'OTHER', 'EXCLUDED']
+const BACKFILL_PRESETS = [
+  { label: '7 days', value: '7d' },
+  { label: '30 days', value: '30d' },
+  { label: '90 days', value: '90d' },
+  { label: 'Full history', value: 'full' },
+]
 
-function formatTs(ts: string | null | undefined) {
-  if (!ts) return '—'
-  return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
-}
+// ─── Main Page ───────────────────────────────────────────────────────────────
 
-// ─── Edit Modal ───────────────────────────────────────────────────────────────
-
-function EditModal({
-  proposal,
-  onClose,
-  onSubmit,
-}: {
-  proposal: Proposal
-  onClose: () => void
-  onSubmit: (id: string, finalValue: string) => Promise<void>
-}) {
-  const [value, setValue] = useState(JSON.stringify(proposal.proposedData, null, 2))
-  const [submitting, setSubmitting] = useState(false)
-
-  async function handleSubmit() {
-    setSubmitting(true)
-    try {
-      JSON.parse(value) // validate
-      await onSubmit(proposal.id, value)
-      onClose()
-    } catch {
-      alert('Invalid JSON. Please fix before submitting.')
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-      <div className="bg-zinc-900 border border-zinc-700 rounded-xl w-full max-w-2xl">
-        <div className="p-4 border-b border-zinc-700 flex items-center justify-between">
-          <h3 className="font-semibold text-white">Edit Proposed Data</h3>
-          <button onClick={onClose} className="text-zinc-400 hover:text-white text-xl">&times;</button>
-        </div>
-        <div className="p-4">
-          <p className="text-sm text-zinc-400 mb-3">Edit the JSON below. Only valid JSON will be accepted.</p>
-          <textarea
-            className="w-full h-64 bg-zinc-800 border border-zinc-600 rounded-lg p-3 text-sm font-mono text-zinc-100 focus:outline-none focus:border-amber-500 resize-none"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-          />
-        </div>
-        <div className="p-4 border-t border-zinc-700 flex justify-end gap-3">
-          <button onClick={onClose} className="px-4 py-2 rounded-lg border border-zinc-600 text-zinc-300 hover:bg-zinc-800 text-sm">Cancel</button>
-          <button
-            onClick={handleSubmit}
-            disabled={submitting}
-            className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium disabled:opacity-50"
-          >
-            {submitting ? 'Saving…' : 'Approve with Edits'}
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ─── Proposal Card ────────────────────────────────────────────────────────────
-
-function ProposalCard({
-  proposal,
-  onAction,
-}: {
-  proposal: Proposal
-  onAction: (id: string, action: 'APPROVE' | 'REJECT' | 'IGNORE', extra?: string) => Promise<void>
-}) {
-  const [loading, setLoading] = useState<string | null>(null)
-  const [editing, setEditing] = useState(false)
-
-  const act = async (action: 'APPROVE' | 'REJECT' | 'IGNORE') => {
-    setLoading(action)
-    await onAction(proposal.id, action)
-    setLoading(null)
-  }
-
-  const pd = proposal.proposedData
-
-  return (
-    <>
-      {editing && (
-        <EditModal
-          proposal={proposal}
-          onClose={() => setEditing(false)}
-          onSubmit={async (id, finalValue) => {
-            await onAction(id, 'APPROVE', finalValue)
-            setEditing(false)
-          }}
-        />
-      )}
-      <div className="bg-zinc-900 border border-amber-700/40 rounded-xl p-5 space-y-4">
-        {/* DRY RUN banner — clearly marks this as a proposal, not a production record */}
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-950/60 border border-amber-700/50 rounded-lg">
-          <span className="text-amber-400 text-xs font-bold tracking-wide">PROPOSAL — NOT YET APPLIED</span>
-          <span className="text-amber-600 text-xs">· Approve to write to production</span>
-        </div>
-
-        {/* Header */}
-        <div className="flex items-start justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-2 flex-wrap">
-            {actionBadge(proposal.proposedAction)}
-            {confidenceBadge(proposal.aiConfidence)}
-            <span className="text-xs text-zinc-500">{proposal.reviewType.replace(/_/g, ' ')}</span>
-          </div>
-          <span className="text-xs text-zinc-500">{formatTs(proposal.createdAt)}</span>
-        </div>
-
-        {/* AI interpretation */}
-        <div className="bg-zinc-800 rounded-lg p-3">
-          <p className="text-xs text-zinc-400 font-medium mb-1">AI Interpretation</p>
-          <p className="text-sm text-zinc-200">{proposal.aiInterpretation}</p>
-        </div>
-
-        {/* Proposed fields */}
-        <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-          {pd.clientName && <div><span className="text-zinc-500">Client</span><span className="ml-2 text-zinc-200">{pd.clientName}</span></div>}
-          {pd.vaName && <div><span className="text-zinc-500">VA</span><span className="ml-2 text-zinc-200">{pd.vaName}</span></div>}
-          {pd.title && <div className="col-span-2"><span className="text-zinc-500">Title</span><span className="ml-2 text-zinc-200 font-medium">{pd.title}</span></div>}
-          {pd.status && <div><span className="text-zinc-500">Status</span><span className="ml-2 text-zinc-200">{pd.status}</span></div>}
-          {pd.priority && <div><span className="text-zinc-500">Priority</span><span className="ml-2 text-zinc-200">{pd.priority}</span></div>}
-          {pd.owner && <div><span className="text-zinc-500">Owner</span><span className="ml-2 text-zinc-200">{pd.owner}</span></div>}
-          {pd.deadline !== undefined && (
-            <div><span className="text-zinc-500">Deadline</span><span className="ml-2 text-zinc-200">{pd.deadline ?? '— (not specified)'}</span></div>
-          )}
-          {pd.nextStep && <div className="col-span-2"><span className="text-zinc-500">Next Step</span><span className="ml-2 text-zinc-200">{pd.nextStep}</span></div>}
-          {pd.blockerDescription && <div className="col-span-2"><span className="text-zinc-500">Blocker</span><span className="ml-2 text-red-400">{pd.blockerDescription}</span></div>}
-          {pd.completionEvidence && <div className="col-span-2"><span className="text-zinc-500">Completion Evidence</span><span className="ml-2 text-emerald-400">{pd.completionEvidence}</span></div>}
-        </div>
-
-        {/* Linked existing item */}
-        {proposal.linkedItem && (
-          <div className="bg-zinc-800/60 border border-zinc-700 rounded-lg p-3 text-sm">
-            <p className="text-zinc-500 text-xs mb-1">Linked Existing Item</p>
-            <p className="text-zinc-200 font-medium">{proposal.linkedItem.title}</p>
-            <p className="text-zinc-400 text-xs">{proposal.linkedItem.client.name}{proposal.linkedItem.va ? ` · ${proposal.linkedItem.va.name}` : ''} · {proposal.linkedItem.status}</p>
-          </div>
-        )}
-
-        {/* Original Slack message */}
-        <div className="bg-zinc-800/40 border-l-2 border-zinc-600 pl-3 py-2">
-          <div className="flex items-center justify-between mb-1">
-            <p className="text-xs text-zinc-500 font-medium">Original Slack Message</p>
-            {proposal.sourceLink && (
-              <a
-                href={proposal.sourceLink}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-amber-500 hover:text-amber-400 underline"
-              >
-                Open in Slack ↗
-              </a>
-            )}
-          </div>
-          <p className="text-sm text-zinc-300 whitespace-pre-wrap break-words">{proposal.sourceMessage}</p>
-          <p className="text-xs text-zinc-500 mt-1">{proposal.sourceTimestamp}</p>
-        </div>
-
-        {/* Actions */}
-        <div className="flex gap-3 pt-1">
-          <button
-            onClick={() => act('APPROVE')}
-            disabled={loading !== null}
-            className="flex-1 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-medium disabled:opacity-50 transition-colors"
-          >
-            {loading === 'APPROVE' ? '…' : '✓ Approve'}
-          </button>
-          <button
-            onClick={() => setEditing(true)}
-            disabled={loading !== null}
-            className="flex-1 py-2 rounded-lg bg-amber-700 hover:bg-amber-600 text-white text-sm font-medium disabled:opacity-50 transition-colors"
-          >
-            ✎ Edit &amp; Approve
-          </button>
-          <button
-            onClick={() => act('REJECT')}
-            disabled={loading !== null}
-            className="flex-1 py-2 rounded-lg bg-red-800 hover:bg-red-700 text-white text-sm font-medium disabled:opacity-50 transition-colors"
-          >
-            {loading === 'REJECT' ? '…' : '✕ Reject'}
-          </button>
-          <button
-            onClick={() => act('IGNORE')}
-            disabled={loading !== null}
-            className="px-4 py-2 rounded-lg border border-zinc-600 text-zinc-400 hover:text-zinc-200 text-sm disabled:opacity-50 transition-colors"
-          >
-            {loading === 'IGNORE' ? '…' : 'Ignore'}
-          </button>
-        </div>
-      </div>
-    </>
-  )
-}
-
-// ─── Main Page ────────────────────────────────────────────────────────────────
-
-export default function SlackPreviewPage() {
-  const [data, setData] = useState<PreviewData | null>(null)
+export default function SlackControlCenter() {
+  const [tab, setTab] = useState<'workspace' | 'channels' | 'proposals'>('workspace')
+  const [workspace, setWorkspace] = useState<WorkspaceData | null>(null)
+  const [channels, setChannels] = useState<Channel[]>([])
+  const [proposals, setProposals] = useState<Proposal[]>([])
+  const [reviewedCounts, setReviewedCounts] = useState<Record<string, number>>({})
+  const [classFilter, setClassFilter] = useState('ALL')
   const [loading, setLoading] = useState(true)
-  const [syncing, setSyncing] = useState(false)
-  const [syncResult, setSyncResult] = useState<string | null>(null)
-  const [filter, setFilter] = useState<'ALL' | 'HIGH' | 'MEDIUM' | 'NEEDS_REVIEW'>('ALL')
-  const [dismissed, setDismissed] = useState<Set<string>>(new Set())
+  const [actionMsg, setActionMsg] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [expandedChannel, setExpandedChannel] = useState<string | null>(null)
+  const [reviewingId, setReviewingId] = useState<string | null>(null)
+  const [backfillChannel, setBackfillChannel] = useState<string | null>(null)
+  const [backfillPreset, setBackfillPreset] = useState('30d')
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch('/api/slack/preview')
-      const json = await res.json()
-      setData(json)
-    } finally {
-      setLoading(false)
+  const loadWorkspace = useCallback(async () => {
+    const r = await fetch('/api/slack/workspace')
+    if (r.ok) setWorkspace(await r.json())
+  }, [])
+
+  const loadChannels = useCallback(async () => {
+    const q = classFilter !== 'ALL' ? `?classification=${classFilter}` : ''
+    const r = await fetch(`/api/slack/channels${q}`)
+    if (r.ok) {
+      const d = await r.json()
+      setChannels(d.channels ?? [])
+    }
+  }, [classFilter])
+
+  const loadProposals = useCallback(async () => {
+    const r = await fetch('/api/slack/preview')
+    if (r.ok) {
+      const d = await r.json()
+      setProposals(d.proposals ?? [])
+      setReviewedCounts(d.reviewedCounts ?? {})
     }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    setLoading(true)
+    Promise.all([loadWorkspace(), loadChannels(), loadProposals()]).finally(() => setLoading(false))
+  }, [loadWorkspace, loadChannels, loadProposals])
+
+  useEffect(() => {
+    if (tab === 'channels') loadChannels()
+  }, [classFilter, tab, loadChannels])
+
+  async function discover() {
+    setBusy(true); setActionMsg('')
+    try {
+      const r = await fetch('/api/slack/workspace/discover', { method: 'POST' })
+      const d = await r.json()
+      if (r.ok) {
+        setActionMsg(`Discovered ${d.channelsDiscovered} channels (${d.channelsAccessible} accessible)`)
+        await loadWorkspace(); await loadChannels()
+      } else {
+        setActionMsg(`Error: ${d.error}`)
+      }
+    } finally { setBusy(false) }
+  }
 
   async function runSync() {
-    setSyncing(true)
-    setSyncResult(null)
+    setBusy(true); setActionMsg('')
     try {
-      const res = await fetch('/api/slack/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isDryRun: true }) })
-      const json = await res.json()
-      if (json.error) {
-        setSyncResult(`Error: ${json.error}`)
+      const r = await fetch('/api/slack/workspace/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isDryRun: true }) })
+      const d = await r.json()
+      if (r.ok) {
+        setActionMsg(`Sync complete — ${d.ingestion?.totalMessagesIngested ?? 0} new messages, ${d.analysis?.proposalsCreated ?? 0} proposals`)
+        await loadWorkspace(); await loadProposals()
       } else {
-        setSyncResult(`Sync complete: ${json.messagesAnalyzed} messages analyzed, ${json.newItemsDetected} new items, ${json.updatesDetected} updates, ${json.completionsDetected} completions, ${json.itemsFlaggedForReview} flagged for review.`)
-        await load()
+        setActionMsg(`Error: ${d.error}`)
       }
-    } catch (e) {
-      setSyncResult(`Sync failed: ${e}`)
-    } finally {
-      setSyncing(false)
-    }
+    } finally { setBusy(false) }
   }
 
-  async function handleAction(id: string, action: 'APPROVE' | 'REJECT' | 'IGNORE', finalValue?: string) {
-    const body: Record<string, string> = { action }
-    if (action === 'APPROVE' && finalValue) {
-      body.action = 'EDIT_AND_APPROVE'
-      body.finalValue = finalValue
-    }
-    body.reviewedBy = 'Rose'
-
-    await fetch(`/api/review/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-
-    setDismissed((prev) => { const s = new Set(prev); s.add(id); return s })
+  async function patchChannel(id: string, patch: Record<string, unknown>) {
+    const r = await fetch(`/api/slack/channels/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) })
+    if (r.ok) await loadChannels()
+    return r.ok
   }
 
-  const proposals = (data?.proposals ?? []).filter((p) => !dismissed.has(p.id))
-  const filtered = filter === 'ALL' ? proposals : proposals.filter((p) => p.aiConfidence === filter)
+  async function runChannelSync(id: string) {
+    setBusy(true); setActionMsg('')
+    try {
+      const r = await fetch(`/api/slack/channels/${id}/sync`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isDryRun: true }) })
+      const d = await r.json()
+      if (r.ok) {
+        setActionMsg(`Channel sync — ${d.ingestion?.messagesIngested ?? 0} new messages, ${d.analysis?.proposalsCreated ?? 0} proposals`)
+        await loadChannels(); await loadProposals()
+      } else {
+        setActionMsg(`Error: ${d.error}`)
+      }
+    } finally { setBusy(false) }
+  }
 
-  const lr = data?.lastRun
+  async function runBackfill(channelId: string) {
+    setBusy(true); setActionMsg('')
+    try {
+      const r = await fetch(`/api/slack/channels/${channelId}/backfill`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sincePreset: backfillPreset }) })
+      const d = await r.json()
+      if (r.ok) {
+        setActionMsg(`Backfill complete — ${d.totalMessagesIngested} messages ingested`)
+        setBackfillChannel(null)
+        await loadChannels()
+      } else {
+        setActionMsg(`Error: ${d.error}`)
+      }
+    } finally { setBusy(false) }
+  }
+
+  async function reviewProposal(id: string, action: 'approve' | 'reject') {
+    setReviewingId(id)
+    try {
+      const r = await fetch(`/api/review/${id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: action.toUpperCase() }) })
+      if (r.ok) await loadProposals()
+    } finally { setReviewingId(null) }
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center">
+        <div className="text-slate-400">Loading Slack Control Center...</div>
+      </div>
+    )
+  }
+
+  const ws = workspace
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-6">
+    <div className="min-h-screen bg-slate-950 text-slate-100">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Slack Dry Run Preview</h1>
-          <p className="text-zinc-400 text-sm mt-1">
-            Review AI-proposed changes before they reach production. No changes apply until you approve.
-          </p>
+      <div className="border-b border-slate-800 px-8 pt-8 pb-0">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-50">Slack Control Center</h1>
+            <p className="text-sm text-slate-400 mt-1">
+              {ws?.workspace?.teamName ?? 'No workspace connected'} — workspace-wide ingestion
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className={`px-3 py-1 rounded-full text-xs font-semibold ${ws?.configured ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-red-950 text-red-400 border border-red-800'}`}>
+              {ws?.configured ? 'Bot Connected' : 'Bot Not Configured'}
+            </span>
+            <span className="px-3 py-1 rounded-full text-xs font-semibold bg-amber-950 text-amber-400 border border-amber-800">
+              DRY RUN MODE
+            </span>
+          </div>
         </div>
-        <div className="flex gap-3">
-          <button
-            onClick={load}
-            disabled={loading}
-            className="px-4 py-2 rounded-lg border border-zinc-600 text-zinc-300 hover:bg-zinc-800 text-sm"
-          >
-            Refresh
-          </button>
-          <button
-            onClick={runSync}
-            disabled={syncing}
-            className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium disabled:opacity-50"
-          >
-            {syncing ? 'Syncing…' : 'Run Dry Run'}
-          </button>
+
+        {/* Tabs */}
+        <div className="flex gap-1">
+          {(['workspace', 'channels', 'proposals'] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`px-5 py-2.5 text-sm font-medium capitalize rounded-t-lg transition-colors ${tab === t ? 'bg-slate-900 text-slate-50 border border-b-0 border-slate-700' : 'text-slate-400 hover:text-slate-200'}`}
+            >
+              {t === 'proposals' ? `Proposals ${(ws?.stats.pendingProposals ?? 0) > 0 ? `(${ws?.stats.pendingProposals})` : ''}` : t.charAt(0).toUpperCase() + t.slice(1)}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Env warning */}
-      {!loading && (!data?.config?.channelId) && (
-        <div className="bg-amber-900/30 border border-amber-700 rounded-xl p-4 text-amber-300 text-sm">
-          <strong>Configuration required:</strong> Set <code className="font-mono bg-amber-900/50 px-1 rounded">SLACK_CHANNEL_ID</code>, <code className="font-mono bg-amber-900/50 px-1 rounded">SLACK_BOT_TOKEN</code>, and <code className="font-mono bg-amber-900/50 px-1 rounded">ANTHROPIC_API_KEY</code> in your <code className="font-mono bg-amber-900/50 px-1 rounded">.env</code> file to enable Slack sync.
-        </div>
-      )}
-
-      {/* Sync result */}
-      {syncResult && (
-        <div className={`rounded-xl p-4 text-sm ${syncResult.startsWith('Error') ? 'bg-red-900/30 border border-red-700 text-red-300' : 'bg-emerald-900/30 border border-emerald-700 text-emerald-300'}`}>
-          {syncResult}
-        </div>
-      )}
-
-      {/* Sync stats */}
-      {lr && (
-        <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-5">
-          <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-            <h2 className="font-semibold text-white">Last Sync Results</h2>
-            <div className="flex items-center gap-2">
-              <span className={`text-xs px-2 py-0.5 rounded font-medium ${lr.status === 'COMPLETED' ? 'bg-emerald-900 text-emerald-300' : lr.status === 'FAILED' ? 'bg-red-900 text-red-300' : 'bg-amber-900 text-amber-300'}`}>
-                {lr.status}
-              </span>
-              <span className="text-xs text-zinc-500">{lr.channelName ?? 'unknown channel'} · {formatTs(lr.runDate)}</span>
-            </div>
+      <div className="px-8 py-6">
+        {/* Action message */}
+        {actionMsg && (
+          <div className="mb-4 px-4 py-2 rounded-lg bg-slate-800 border border-slate-700 text-sm text-slate-200">
+            {actionMsg}
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            {[
-              { label: 'Messages Analyzed', value: lr.messagesAnalyzed },
-              { label: 'Messages Skipped', value: lr.messagesSkipped },
-              { label: 'New Items Detected', value: lr.newItemsDetected },
-              { label: 'Updates Detected', value: lr.updatesDetected },
-              { label: 'Completions Detected', value: lr.completionsDetected },
-              { label: 'Flagged for Review', value: lr.itemsFlaggedForReview },
-              { label: 'Approved', value: data?.reviewedCounts['APPROVED'] ?? 0 },
-              { label: 'Rejected', value: data?.reviewedCounts['REJECTED'] ?? 0 },
-            ].map(({ label, value }) => (
-              <div key={label} className="bg-zinc-800 rounded-lg p-3">
-                <p className="text-zinc-400 text-xs">{label}</p>
-                <p className="text-2xl font-bold text-white mt-1">{value}</p>
+        )}
+
+        {/* ── Workspace Tab ─────────────────────────────────────────────────── */}
+        {tab === 'workspace' && (
+          <div className="space-y-6">
+            {/* Stats row */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {[
+                { label: 'Total Channels', value: ws?.stats.allChannels ?? 0 },
+                { label: 'Ingestion Enabled', value: ws?.stats.ingestionEnabled ?? 0 },
+                { label: 'Messages Stored', value: ws?.stats.totalMessages ?? 0 },
+                { label: 'Pending Proposals', value: ws?.stats.pendingProposals ?? 0 },
+              ].map(({ label, value }) => (
+                <div key={label} className="bg-slate-900 border border-slate-800 rounded-xl p-5">
+                  <p className="text-2xl font-bold text-slate-50">{value.toLocaleString()}</p>
+                  <p className="text-xs text-slate-400 mt-1">{label}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Workspace info + Actions */}
+            <div className="grid md:grid-cols-2 gap-4">
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+                <h2 className="font-semibold text-slate-200">Workspace</h2>
+                {ws?.workspace ? (
+                  <div className="space-y-1.5 text-sm">
+                    <div className="flex justify-between"><span className="text-slate-400">Team</span><span className="text-slate-200">{ws.workspace.teamName ?? '—'}</span></div>
+                    <div className="flex justify-between"><span className="text-slate-400">Domain</span><span className="text-slate-200">{ws.workspace.teamDomain ? `${ws.workspace.teamDomain}.slack.com` : '—'}</span></div>
+                    <div className="flex justify-between"><span className="text-slate-400">Channels found</span><span className="text-slate-200">{ws.workspace.totalChannels}</span></div>
+                    <div className="flex justify-between"><span className="text-slate-400">Accessible</span><span className="text-slate-200">{ws.workspace.accessibleChannels}</span></div>
+                    <div className="flex justify-between"><span className="text-slate-400">Last discovered</span><span className="text-slate-200">{rel(ws.workspace.lastDiscoveredAt)}</span></div>
+                    <div className="flex justify-between"><span className="text-slate-400">Last sync</span><span className="text-slate-200">{rel(ws.workspace.lastSyncAt)}</span></div>
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-500">No workspace discovered yet. Click &quot;Discover Channels&quot; to connect.</p>
+                )}
               </div>
-            ))}
-          </div>
-          {lr.errorLog && (
-            <div className="mt-3 bg-red-900/30 border border-red-800 rounded-lg p-3 text-xs text-red-300 font-mono">
-              {lr.errorLog}
+
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+                <h2 className="font-semibold text-slate-200">Actions</h2>
+                <p className="text-xs text-slate-500">All sync operations run in DRY RUN mode — no production data is written until explicitly approved.</p>
+                <div className="space-y-2">
+                  <button
+                    onClick={discover}
+                    disabled={busy || !ws?.configured}
+                    className="w-full px-4 py-2.5 rounded-lg text-sm font-medium bg-slate-700 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {busy ? 'Working...' : 'Discover Channels'}
+                  </button>
+                  <button
+                    onClick={runSync}
+                    disabled={busy || !ws?.configured || (ws?.stats.ingestionEnabled ?? 0) === 0}
+                    className="w-full px-4 py-2.5 rounded-lg text-sm font-medium bg-amber-800 hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed text-amber-100 transition-colors"
+                  >
+                    {busy ? 'Working...' : 'Run Workspace Sync (Dry Run)'}
+                  </button>
+                </div>
+                {ws?.stats.errorChannels ? (
+                  <p className="text-xs text-red-400">{ws.stats.errorChannels} channel(s) have errors — check the Channels tab.</p>
+                ) : null}
+              </div>
             </div>
-          )}
-        </div>
-      )}
 
-      {/* Config info */}
-      {data?.config && (
-        <div className="text-xs text-zinc-500 flex gap-4 flex-wrap">
-          <span>Channel: <code className="font-mono text-zinc-400">{data.config.channelName ?? data.config.channelId ?? 'not set'}</code></span>
-          <span>Cursor: <code className="font-mono text-zinc-400">{data.config.cursor ?? 'initial (full history)'}</code></span>
-          <span>Last sync: <code className="font-mono text-zinc-400">{data.config.lastSyncAt ? formatTs(data.config.lastSyncAt) : 'never'}</code></span>
-        </div>
-      )}
+            {/* Last run */}
+            {ws?.lastRun && (
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
+                <h2 className="font-semibold text-slate-200 mb-3">Last Analysis Run</h2>
+                <div className="flex items-center gap-4 text-sm">
+                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${ws.lastRun.status === 'COMPLETED' ? 'bg-emerald-900 text-emerald-300' : ws.lastRun.status === 'RUNNING' ? 'bg-blue-900 text-blue-300' : 'bg-red-900 text-red-300'}`}>
+                    {ws.lastRun.status}
+                  </span>
+                  <span className="text-slate-400">{rel(ws.lastRun.runDate)}</span>
+                  <span className="text-slate-300">{ws.lastRun.messagesAnalyzed} messages analyzed</span>
+                  <span className="text-slate-300">{ws.lastRun.itemsFlaggedForReview} proposals</span>
+                  {ws.lastRun.channelName && <span className="text-slate-500">#{ws.lastRun.channelName}</span>}
+                </div>
+              </div>
+            )}
 
-      {/* Proposals */}
-      <div>
-        <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-          <h2 className="font-semibold text-white">
-            Pending Proposals <span className="text-zinc-400 font-normal">({proposals.length})</span>
-          </h2>
-          <div className="flex gap-2">
-            {(['ALL', 'HIGH', 'MEDIUM', 'NEEDS_REVIEW'] as const).map((f) => (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${filter === f ? 'bg-amber-600 text-white' : 'border border-zinc-600 text-zinc-400 hover:bg-zinc-800'}`}
-              >
-                {f.replace(/_/g, ' ')}
-              </button>
-            ))}
+            {/* Channels with errors */}
+            {(ws?.channelsWithErrors.length ?? 0) > 0 && (
+              <div className="bg-slate-900 border border-red-900/30 rounded-xl p-5">
+                <h2 className="font-semibold text-red-400 mb-3">Channels with Errors</h2>
+                <div className="space-y-2">
+                  {ws!.channelsWithErrors.map((c) => (
+                    <div key={c.slackChannelId} className="flex items-start justify-between text-sm">
+                      <span className="text-slate-200">#{c.channelName ?? c.slackChannelId}</span>
+                      <span className="text-red-400 text-xs max-w-xs text-right">{c.lastError}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
-        </div>
+        )}
 
-        {loading ? (
-          <div className="text-center text-zinc-500 py-12">Loading…</div>
-        ) : filtered.length === 0 ? (
-          <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-12 text-center">
-            <p className="text-zinc-400 text-lg">No pending proposals</p>
-            <p className="text-zinc-500 text-sm mt-2">
-              {proposals.length === 0
-                ? 'Run a dry run to analyze your Slack channel.'
-                : 'All proposals have been reviewed for this filter.'}
-            </p>
-          </div>
-        ) : (
+        {/* ── Channels Tab ──────────────────────────────────────────────────── */}
+        {tab === 'channels' && (
           <div className="space-y-4">
-            {filtered.map((p) => (
-              <ProposalCard key={p.id} proposal={p} onAction={handleAction} />
-            ))}
+            {/* Filters */}
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className="text-sm text-slate-400">Filter:</span>
+              {CLASSIFICATIONS.map((c) => (
+                <button
+                  key={c}
+                  onClick={() => setClassFilter(c)}
+                  className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${classFilter === c ? 'bg-amber-700 text-amber-100' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
+                >
+                  {c}
+                </button>
+              ))}
+              <span className="text-sm text-slate-500 ml-auto">{channels.length} channels</span>
+            </div>
+
+            {channels.length === 0 ? (
+              <div className="text-center py-16 text-slate-500">
+                <p>No channels found.</p>
+                <p className="text-sm mt-1">Run &quot;Discover Channels&quot; from the Workspace tab first.</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {channels.map((ch) => (
+                  <div key={ch.id} className={`bg-slate-900 border rounded-xl overflow-hidden ${ch.lastError ? 'border-red-900/50' : 'border-slate-800'}`}>
+                    {/* Channel row */}
+                    <div
+                      className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-slate-800/50 transition-colors"
+                      onClick={() => setExpandedChannel(expandedChannel === ch.id ? null : ch.id)}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-slate-200 font-medium text-sm">
+                            {ch.isPrivate ? '🔒' : '#'}{ch.channelName ?? ch.slackChannelId}
+                          </span>
+                          {ch.isArchived && <span className="text-xs text-slate-500">(archived)</span>}
+                          {!ch.isAccessible && <span className="text-xs text-red-400">(no access)</span>}
+                          {ch.lastError && <span className="text-xs text-red-400">⚠ error</span>}
+                        </div>
+                      </div>
+
+                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${classificationColor(ch.classification)}`}>
+                        {ch.classification}
+                      </span>
+
+                      <div className="flex items-center gap-3 text-xs text-slate-400">
+                        <span title="Ingestion">
+                          Ingest: <span className={ch.ingestionEnabled ? 'text-emerald-400' : 'text-slate-600'}>{ch.ingestionEnabled ? 'ON' : 'off'}</span>
+                        </span>
+                        <span title="AI Analysis">
+                          AI: <span className={ch.analysisEnabled ? 'text-emerald-400' : 'text-slate-600'}>{ch.analysisEnabled ? 'ON' : 'off'}</span>
+                        </span>
+                        <span className="text-slate-500">{rel(ch.lastSyncAt)}</span>
+                      </div>
+
+                      <span className="text-slate-600 text-xs">{expandedChannel === ch.id ? '▲' : '▼'}</span>
+                    </div>
+
+                    {/* Expanded channel controls */}
+                    {expandedChannel === ch.id && (
+                      <div className="border-t border-slate-800 px-4 py-4 bg-slate-900/50 space-y-4">
+                        {/* Classification selector */}
+                        <div className="flex items-center gap-3">
+                          <label className="text-xs text-slate-400 w-28">Classification</label>
+                          <select
+                            value={ch.classification}
+                            onChange={(e) => patchChannel(ch.id, { classification: e.target.value })}
+                            className="bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded px-2 py-1"
+                          >
+                            {CLASSIFICATIONS.filter((c) => c !== 'ALL').map((c) => (
+                              <option key={c} value={c}>{c}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Toggles */}
+                        <div className="flex items-center gap-6">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={ch.ingestionEnabled}
+                              onChange={(e) => patchChannel(ch.id, { ingestionEnabled: e.target.checked })}
+                              className="accent-amber-500"
+                            />
+                            <span className="text-xs text-slate-300">Enable Ingestion</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={ch.analysisEnabled}
+                              disabled={ch.classification === 'EXCLUDED' || !ch.isAccessible}
+                              onChange={(e) => patchChannel(ch.id, { analysisEnabled: e.target.checked })}
+                              className="accent-amber-500 disabled:opacity-40"
+                            />
+                            <span className="text-xs text-slate-300">Enable AI Analysis</span>
+                          </label>
+                        </div>
+
+                        {/* Action buttons */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {ch.ingestionEnabled && (
+                            <button
+                              onClick={() => runChannelSync(ch.id)}
+                              disabled={busy}
+                              className="px-3 py-1.5 rounded text-xs font-medium bg-amber-800 hover:bg-amber-700 disabled:opacity-40 text-amber-100 transition-colors"
+                            >
+                              Sync Channel
+                            </button>
+                          )}
+                          <button
+                            onClick={() => setBackfillChannel(backfillChannel === ch.id ? null : ch.id)}
+                            disabled={busy}
+                            className="px-3 py-1.5 rounded text-xs font-medium bg-slate-700 hover:bg-slate-600 disabled:opacity-40 transition-colors"
+                          >
+                            Backfill
+                          </button>
+                          {ch.cursor && (
+                            <button
+                              onClick={() => patchChannel(ch.id, { resetCursor: true })}
+                              className="px-3 py-1.5 rounded text-xs font-medium bg-slate-700 hover:bg-slate-600 transition-colors text-slate-300"
+                            >
+                              Reset Cursor
+                            </button>
+                          )}
+                          {ch.lastError && (
+                            <button
+                              onClick={() => patchChannel(ch.id, { clearError: true })}
+                              className="px-3 py-1.5 rounded text-xs font-medium bg-red-900 hover:bg-red-800 transition-colors text-red-200"
+                            >
+                              Clear Error
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Backfill controls */}
+                        {backfillChannel === ch.id && (
+                          <div className="flex items-center gap-2 p-3 rounded-lg bg-slate-800 border border-slate-700">
+                            <span className="text-xs text-slate-400">Backfill period:</span>
+                            {BACKFILL_PRESETS.map((p) => (
+                              <button
+                                key={p.value}
+                                onClick={() => setBackfillPreset(p.value)}
+                                className={`px-2 py-1 rounded text-xs font-medium transition-colors ${backfillPreset === p.value ? 'bg-amber-700 text-amber-100' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}
+                              >
+                                {p.label}
+                              </button>
+                            ))}
+                            <button
+                              onClick={() => runBackfill(ch.id)}
+                              disabled={busy}
+                              className="ml-2 px-3 py-1 rounded text-xs font-medium bg-amber-800 hover:bg-amber-700 disabled:opacity-40 text-amber-100"
+                            >
+                              {busy ? 'Running...' : 'Start Backfill'}
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Error display */}
+                        {ch.lastError && (
+                          <div className="text-xs text-red-400 bg-red-950/30 border border-red-900/30 rounded p-2">
+                            {ch.lastError}
+                          </div>
+                        )}
+
+                        {/* Stats */}
+                        <div className="flex gap-4 text-xs text-slate-500">
+                          <span>Cursor: {ch.cursor ? 'set' : 'none'}</span>
+                          <span>Last sync: {rel(ch.lastSyncAt)}</span>
+                          <span>Last success: {rel(ch.lastSuccessfulSyncAt)}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Proposals Tab ─────────────────────────────────────────────────── */}
+        {tab === 'proposals' && (
+          <div className="space-y-4">
+            {/* Summary */}
+            <div className="flex items-center gap-4 text-sm">
+              <span className="text-slate-200 font-medium">{proposals.length} pending proposals</span>
+              {Object.entries(reviewedCounts).map(([status, count]) => (
+                <span key={status} className="text-slate-500">{count} {status.toLowerCase()}</span>
+              ))}
+            </div>
+
+            {/* DRY RUN banner */}
+            <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-amber-950/40 border border-amber-700/40 text-amber-300 text-sm">
+              <span className="font-semibold">PROPOSAL — NOT YET APPLIED</span>
+              <span className="text-amber-400/70">All proposals are in dry-run mode. Approving writes to production.</span>
+            </div>
+
+            {proposals.length === 0 ? (
+              <div className="text-center py-16 text-slate-500">No pending proposals. Run a sync to generate AI extractions.</div>
+            ) : (
+              <div className="space-y-3">
+                {proposals.map((p) => (
+                  <div key={p.id} className="bg-slate-900 border border-amber-700/40 rounded-xl p-5 space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {confidenceBadge(p.aiConfidence)}
+                        <span className="px-2 py-0.5 rounded text-xs font-medium bg-slate-700 text-slate-300">{p.proposedAction}</span>
+                        <span className="px-2 py-0.5 rounded text-xs bg-slate-800 text-slate-400">{p.reviewType}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => reviewProposal(p.id, 'approve')}
+                          disabled={reviewingId === p.id}
+                          className="px-3 py-1.5 rounded text-xs font-medium bg-emerald-800 hover:bg-emerald-700 disabled:opacity-40 text-emerald-100 transition-colors"
+                        >
+                          Approve
+                        </button>
+                        <button
+                          onClick={() => reviewProposal(p.id, 'reject')}
+                          disabled={reviewingId === p.id}
+                          className="px-3 py-1.5 rounded text-xs font-medium bg-red-900 hover:bg-red-800 disabled:opacity-40 text-red-200 transition-colors"
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    </div>
+
+                    <p className="text-sm text-slate-200">{p.aiInterpretation}</p>
+
+                    {p.linkedItem && (
+                      <div className="text-xs text-slate-400">
+                        Linked: <span className="text-slate-300">{p.linkedItem.title}</span>
+                        {' '}— {p.linkedItem.client.name}{p.linkedItem.va ? ` / ${p.linkedItem.va.name}` : ''}
+                      </div>
+                    )}
+
+                    {(p.proposedData.clientName || p.proposedData.vaName) && (
+                      <div className="text-xs text-slate-400">
+                        {p.proposedData.clientName && <span>Client: <span className="text-slate-300">{p.proposedData.clientName}</span> </span>}
+                        {p.proposedData.vaName && <span>VA: <span className="text-slate-300">{p.proposedData.vaName}</span></span>}
+                      </div>
+                    )}
+
+                    {p.sourceMessage && (
+                      <div className="text-xs text-slate-500 bg-slate-800/60 rounded p-2 border-l-2 border-slate-700">
+                        {p.sourceMessage.length > 200 ? p.sourceMessage.slice(0, 200) + '…' : p.sourceMessage}
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-3 text-xs text-slate-500">
+                      <span>{rel(p.createdAt)}</span>
+                      {p.sourceLink && (
+                        <a href={p.sourceLink} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300">
+                          View in Slack ↗
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>

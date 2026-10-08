@@ -65,6 +65,101 @@ export interface SlackIngested {
   isParentWithReplies: boolean
 }
 
+export interface WorkspaceInfo {
+  teamId: string
+  teamName: string
+  teamDomain: string
+  botUserId: string
+}
+
+export interface ChannelInfo {
+  slackChannelId: string
+  channelName: string
+  channelType: string
+  isPrivate: boolean
+  isArchived: boolean
+  isMember: boolean
+  isAccessible: boolean
+}
+
+// ─── Workspace info ─────────────────────────────────────────────────────────
+
+export async function getWorkspaceInfo(): Promise<WorkspaceInfo> {
+  const data = await slackGet<{
+    team_id: string
+    team: string
+    url: string
+    user_id: string
+  }>('auth.test')
+
+  const domainMatch = data.url?.match(/https?:\/\/([^.]+)\.slack\.com/)
+  return {
+    teamId: data.team_id,
+    teamName: data.team,
+    teamDomain: domainMatch?.[1] ?? '',
+    botUserId: data.user_id,
+  }
+}
+
+// ─── Channel discovery ──────────────────────────────────────────────────────
+
+export async function discoverChannels(): Promise<ChannelInfo[]> {
+  const allChannels: ChannelInfo[] = []
+
+  // Discover public channels
+  await paginateChannels('public_channel', allChannels)
+
+  // Discover private channels the bot has access to
+  await paginateChannels('private_channel', allChannels)
+
+  return allChannels
+}
+
+async function paginateChannels(type: string, out: ChannelInfo[]): Promise<void> {
+  let cursor: string | null = null
+
+  do {
+    const params: Record<string, string> = {
+      types: type,
+      limit: '200',
+      exclude_archived: 'false',
+    }
+    if (cursor) params.cursor = cursor
+
+    let data: {
+      channels: Array<{
+        id: string
+        name: string
+        is_private: boolean
+        is_archived: boolean
+        is_member: boolean
+      }>
+      response_metadata?: { next_cursor?: string }
+    }
+
+    try {
+      data = await slackGet('conversations.list', params)
+    } catch {
+      // Bot may not have access to private channels — non-fatal
+      break
+    }
+
+    for (const ch of data.channels ?? []) {
+      out.push({
+        slackChannelId: ch.id,
+        channelName: ch.name,
+        channelType: ch.is_private ? 'PRIVATE' : 'PUBLIC',
+        isPrivate: ch.is_private,
+        isArchived: ch.is_archived,
+        isMember: ch.is_member,
+        isAccessible: ch.is_member,  // can only read if bot is a member
+      })
+    }
+
+    cursor = data.response_metadata?.next_cursor ?? null
+  } while (cursor)
+}
+
 // ─── Channel info ───────────────────────────────────────────────────────────
 
 export async function getChannelName(channelId: string): Promise<string> {
@@ -79,17 +174,16 @@ export async function getChannelName(channelId: string): Promise<string> {
   }
 }
 
-// ─── User resolution (cached per invocation) ───────────────────────────────
+// ─── User resolution (cached per module lifecycle) ──────────────────────────
 
 const userCache: Record<string, string> = {}
 
-async function resolveUser(userId: string): Promise<string> {
+export async function resolveUser(userId: string): Promise<string> {
   if (userCache[userId]) return userCache[userId]
   try {
-    const data = await slackGet<{ user: { real_name?: string; profile?: { display_name?: string; real_name?: string } } }>(
-      'users.info',
-      { user: userId }
-    )
+    const data = await slackGet<{
+      user: { real_name?: string; profile?: { display_name?: string; real_name?: string } }
+    }>('users.info', { user: userId })
     const name =
       data.user.profile?.display_name ||
       data.user.profile?.real_name ||
@@ -104,7 +198,7 @@ async function resolveUser(userId: string): Promise<string> {
 
 // ─── Permalink ──────────────────────────────────────────────────────────────
 
-function buildPermalink(channelId: string, ts: string): string {
+export function buildPermalink(channelId: string, ts: string): string {
   const tsSafe = ts.replace('.', '')
   return `https://app.slack.com/archives/${channelId}/p${tsSafe}`
 }
@@ -135,10 +229,8 @@ async function fetchAllThreadReplies(
     }>('conversations.replies', params)
 
     const page = data.messages ?? []
-
     if (isFirstPage) {
-      // First message on first page is the parent — already stored from channel history
-      allReplies.push(...page.slice(1))
+      allReplies.push(...page.slice(1)) // first message is parent — already in history
       isFirstPage = false
     } else {
       allReplies.push(...page)
@@ -152,13 +244,12 @@ async function fetchAllThreadReplies(
   return allReplies
 }
 
-// ─── Ingest: fetch all pages + resolve names + build permalinks ─────────────
+// ─── Ingest a single channel (all pages since cursor) ──────────────────────
 
 export async function ingestChannel(
   channelId: string,
   cursor?: string | null
 ): Promise<{ ingested: SlackIngested[]; newCursor: string | null }> {
-  // Paginate through all messages since cursor
   const allMessages: SlackRawMessage[] = []
   let paginationCursor: string | null = null
   let hasMore = true
@@ -184,12 +275,11 @@ export async function ingestChannel(
     if (!paginationCursor) hasMore = false
   }
 
-  // Filter out bot/system messages that aren't useful
   const relevant = allMessages.filter(
     (m) => m.text && m.text.trim().length > 0 && !m.subtype?.includes('join')
   )
 
-  // Collect thread parent messages and fetch their replies (paginated)
+  // Fetch thread replies for messages that have them
   const threadReplies: SlackRawMessage[] = []
   for (const m of relevant) {
     if ((m.reply_count ?? 0) > 0 && m.thread_ts === m.ts) {
@@ -197,14 +287,13 @@ export async function ingestChannel(
         const replies = await fetchAllThreadReplies(channelId, m.ts)
         threadReplies.push(...replies)
       } catch {
-        // Non-fatal — skip thread if fetch fails
+        // Non-fatal — skip if thread fetch fails
       }
     }
   }
 
   const combined = [...relevant, ...threadReplies]
 
-  // Resolve usernames
   const ingested: SlackIngested[] = []
   for (const m of combined) {
     const userId = m.user ?? m.bot_id ?? null
@@ -222,8 +311,7 @@ export async function ingestChannel(
     })
   }
 
-  // Slack returns messages newest-first; relevant[0] is the newest message seen.
-  // Store it as the cursor so next sync fetches only messages after this point.
+  // Slack returns newest-first; relevant[0] is the newest message.
   const newCursor = relevant.length > 0 ? relevant[0].ts : cursor ?? null
 
   return { ingested, newCursor }

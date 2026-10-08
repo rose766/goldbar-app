@@ -6,8 +6,6 @@ import { prisma } from '@/lib/prisma'
 
 export async function GET() {
   try {
-    const channelId = process.env.SLACK_CHANNEL_ID ?? null
-
     // Latest dry-run analysis run
     const lastRun = await prisma.slackAnalysisRun.findFirst({
       where: { isDryRun: true },
@@ -55,10 +53,23 @@ export async function GET() {
       _count: { status: true },
     })
 
-    // Config status
-    const config = channelId
-      ? await prisma.slackSyncConfig.findUnique({ where: { channelId } }).catch(() => null)
-      : null
+    // Workspace status (replaces old SlackSyncConfig)
+    const workspace = await prisma.slackWorkspace.findFirst({
+      orderBy: { updatedAt: 'desc' },
+      select: {
+        teamId: true,
+        teamName: true,
+        teamDomain: true,
+        totalChannels: true,
+        accessibleChannels: true,
+        lastDiscoveredAt: true,
+        lastSyncAt: true,
+      },
+    })
+
+    const ingestionEnabledCount = await prisma.slackChannel.count({
+      where: { ingestionEnabled: true, enabled: true },
+    })
 
     return NextResponse.json({
       lastRun,
@@ -83,13 +94,8 @@ export async function GET() {
         acc[r.status] = r._count.status
         return acc
       }, {}),
-      config: {
-        channelId: config?.channelId ?? channelId,
-        channelName: config?.channelName ?? null,
-        cursor: config?.cursor ?? null,
-        lastSyncAt: config?.lastSyncAt ?? null,
-        isEnabled: config?.isEnabled ?? false,
-      },
+      workspace: workspace ?? null,
+      ingestionEnabledChannels: ingestionEnabledCount,
     })
   } catch (error) {
     console.error('Slack preview GET error:', error)

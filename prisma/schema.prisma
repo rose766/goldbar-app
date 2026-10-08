@@ -269,37 +269,89 @@ model ClientHealthHistory {
   @@index([clientId])
 }
 
-// ─── SLACK ANALYSIS RUN ───────────────────────────────────────────────────────
+// ─── SLACK WORKSPACE ──────────────────────────────────────────────────────────
 
-model SlackSyncConfig {
-  id          String    @id @default(cuid())
-  channelId   String    @unique
-  channelName String?
-  cursor      String?
-  isEnabled   Boolean   @default(false)
-  lastSyncAt  DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+model SlackWorkspace {
+  id                 String        @id @default(cuid())
+  teamId             String        @unique
+  teamName           String?
+  teamDomain         String?
+  botUserId          String?
+  totalChannels      Int           @default(0)
+  accessibleChannels Int           @default(0)
+  lastDiscoveredAt   DateTime?
+  lastSyncAt         DateTime?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  channels           SlackChannel[]
 }
 
+// ─── SLACK CHANNEL (per-channel config + cursor + stats) ─────────────────────
+
+model SlackChannel {
+  id                   String          @id @default(cuid())
+  workspaceId          String?
+  workspace            SlackWorkspace? @relation(fields: [workspaceId], references: [id])
+  slackChannelId       String          @unique
+  channelName          String?
+  channelType          String          @default("PUBLIC")
+  isPrivate            Boolean         @default(false)
+  isArchived           Boolean         @default(false)
+  isMember             Boolean         @default(false)
+  isAccessible         Boolean         @default(true)
+
+  enabled              Boolean         @default(true)
+  ingestionEnabled     Boolean         @default(false)
+  analysisEnabled      Boolean         @default(false)
+
+  // Classification: CLIENT | INTERNAL | OPERATIONS | STAFFING | HR | LEADERSHIP | TRAINING | SOCIAL | OTHER | EXCLUDED
+  classification       String          @default("OTHER")
+
+  cursor               String?
+  lastSyncAt           DateTime?
+  lastSuccessfulSyncAt DateTime?
+  lastError            String?
+
+  messagesAnalyzed     Int             @default(0)
+  messagesSkipped      Int             @default(0)
+  totalMessages        Int             @default(0)
+
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+
+  messages             SlackMessage[]
+  analysisRuns         SlackAnalysisRun[]
+
+  @@index([workspaceId])
+  @@index([classification])
+  @@index([ingestionEnabled])
+  @@index([analysisEnabled])
+  @@index([isArchived])
+}
+
+// ─── SLACK ANALYSIS RUN ───────────────────────────────────────────────────────
+
 model SlackAnalysisRun {
-  id                    String   @id @default(cuid())
-  runDate               DateTime @default(now())
+  id                    String       @id @default(cuid())
+  runDate               DateTime     @default(now())
+  slackChannelDbId      String?
+  slackChannel          SlackChannel? @relation(fields: [slackChannelDbId], references: [id])
   channelId             String?
   channelName           String?
   lastCursorTimestamp   String?
-  messagesAnalyzed      Int      @default(0)
-  messagesSkipped       Int      @default(0)
-  newItemsDetected      Int      @default(0)
-  updatesDetected       Int      @default(0)
-  completionsDetected   Int      @default(0)
-  itemsCreated          Int      @default(0)
-  itemsUpdated          Int      @default(0)
-  itemsCompleted        Int      @default(0)
-  itemsFlaggedForReview Int      @default(0)
-  gamePlansCreated      Int      @default(0)
-  isDryRun              Boolean  @default(true)
-  status                String   @default("RUNNING")
+  messagesAnalyzed      Int          @default(0)
+  messagesSkipped       Int          @default(0)
+  newItemsDetected      Int          @default(0)
+  updatesDetected       Int          @default(0)
+  completionsDetected   Int          @default(0)
+  itemsCreated          Int          @default(0)
+  itemsUpdated          Int          @default(0)
+  itemsCompleted        Int          @default(0)
+  itemsFlaggedForReview Int          @default(0)
+  gamePlansCreated      Int          @default(0)
+  isDryRun              Boolean      @default(true)
+  status                String       @default("RUNNING")
   errorLog              String?
   completedAt           DateTime?
 
@@ -308,28 +360,35 @@ model SlackAnalysisRun {
 
   @@index([status])
   @@index([runDate])
+  @@index([slackChannelDbId])
 }
 
 // ─── SLACK MESSAGE ────────────────────────────────────────────────────────────
 
 model SlackMessage {
-  id              String           @id @default(cuid())
-  analysisRunId   String?
-  analysisRun     SlackAnalysisRun? @relation(fields: [analysisRunId], references: [id])
-  slackTimestamp  String
-  slackMessageId  String?
-  channelId       String?
-  channelName     String?
-  authorName      String?
-  authorId        String?
-  rawText         String
-  threadTs        String?
-  classification  String           @default("UNCLEAR")
-  processedAt     DateTime         @default(now())
+  id               String            @id @default(cuid())
+  analysisRunId    String?
+  analysisRun      SlackAnalysisRun? @relation(fields: [analysisRunId], references: [id])
+  slackChannelDbId String?
+  slackChannel     SlackChannel?     @relation(fields: [slackChannelDbId], references: [id])
+  slackTimestamp   String
+  slackMessageId   String?
+  channelId        String?
+  channelName      String?
+  authorName       String?
+  authorId         String?
+  rawText          String
+  threadTs         String?
+  permalink        String?
+  postedAt         DateTime?
+  classification   String            @default("UNCLEAR")
+  processedAt      DateTime          @default(now())
 
   @@unique([slackTimestamp, channelId])
   @@index([channelId])
   @@index([analysisRunId])
+  @@index([slackChannelDbId])
+  @@index([processedAt])
 }
 
 // ─── AI REVIEW QUEUE ──────────────────────────────────────────────────────────
