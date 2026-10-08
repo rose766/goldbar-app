@@ -1,0 +1,372 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── CLIENT ───────────────────────────────────────────────────────────────────
+
+model Client {
+  id                    String        @id @default(cuid())
+  name                  String
+  status                String        @default("ACTIVE")
+  accountManager        String        @default("Rose")
+  health                String        @default("ON_TRACK")
+  healthReasons         String?       // JSON array of strings explaining the health score
+  nextCheckIn           DateTime?
+  lastActivity          DateTime?
+  lastDashboardUpdate   DateTime?
+  lastSlackSync         DateTime?
+  lastItemUpdate        DateTime?
+  lastConfirmedActivity DateTime?
+  staleThresholdDays    Int           @default(5)
+  notes                 String?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  vas                   VA[]
+  openItems             OpenItem[]
+  gamePlans             GamePlan[]
+  healthHistory         ClientHealthHistory[]
+
+  @@index([health])
+  @@index([status])
+}
+
+// ─── VA / EXECUTIVE ASSISTANT ─────────────────────────────────────────────────
+
+model VA {
+  id                 String    @id @default(cuid())
+  clientId           String
+  client             Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  name               String
+  role               String?
+  startDate          DateTime?
+  status             String    @default("ACTIVE")
+  currentPriorities  String?
+  performanceFlags   String?   // JSON array
+  lastClientFeedback String?
+  lastUpdate         DateTime?
+  notes              String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  openItems          OpenItem[]
+  milestones         Milestone[]
+
+  @@index([clientId])
+  @@index([status])
+}
+
+// ─── GAME PLAN / SOURCE DOCUMENT ──────────────────────────────────────────────
+
+model GamePlan {
+  id                String    @id @default(cuid())
+  clientId          String
+  client            Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  title             String
+  version           Int       @default(1)
+  status            String    @default("ACTIVE")
+  date              DateTime
+  summary           String?
+  keyObjectives     String?
+  keyCommitments    String?
+  nextSteps         String?
+  sourceSlackMessage String?
+  sourceLink        String?
+  sourceChannel     String?
+  sourceDate        DateTime?
+  sourceTimestamp   String?
+  lastReviewed      DateTime?
+  notes             String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  previousVersionId String?
+  previousVersion   GamePlan? @relation("GamePlanVersions", fields: [previousVersionId], references: [id])
+  laterVersions     GamePlan[] @relation("GamePlanVersions")
+
+  objectives        Objective[]
+  openItems         OpenItem[]
+
+  @@index([clientId])
+  @@index([status])
+}
+
+// ─── OBJECTIVE ────────────────────────────────────────────────────────────────
+
+model Objective {
+  id          String    @id @default(cuid())
+  gamePlanId  String
+  gamePlan    GamePlan  @relation(fields: [gamePlanId], references: [id], onDelete: Cascade)
+  title       String
+  description String?
+  status      String    @default("IN_PROGRESS")
+  priority    String    @default("MEDIUM")
+  dueDate     DateTime?
+  notes       String?
+  order       Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  milestones  Milestone[]
+  openItems   OpenItem[]
+
+  @@index([gamePlanId])
+}
+
+// ─── MILESTONE ────────────────────────────────────────────────────────────────
+
+model Milestone {
+  id          String    @id @default(cuid())
+  objectiveId String
+  objective   Objective @relation(fields: [objectiveId], references: [id], onDelete: Cascade)
+  vaId        String?
+  va          VA?       @relation(fields: [vaId], references: [id])
+  title       String
+  description String?
+  status      String    @default("NOT_STARTED")
+  deadline    DateTime?
+  completedAt DateTime?
+  order       Int       @default(0)
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  openItems   OpenItem[]
+
+  @@index([objectiveId])
+}
+
+// ─── OPEN ITEM ────────────────────────────────────────────────────────────────
+
+model OpenItem {
+  id           String     @id @default(cuid())
+  clientId     String
+  client       Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  vaId         String?
+  va           VA?        @relation(fields: [vaId], references: [id])
+  gamePlanId   String?
+  gamePlan     GamePlan?  @relation(fields: [gamePlanId], references: [id])
+  objectiveId  String?
+  objective    Objective? @relation(fields: [objectiveId], references: [id])
+  milestoneId  String?
+  milestone    Milestone? @relation(fields: [milestoneId], references: [id])
+
+  // Core
+  title        String
+  description  String?
+  nextStep     String?
+
+  // Ownership
+  owner             String?
+  ownerType         String  @default("UNASSIGNED")
+  ownerConfidence   String  @default("HIGH")
+
+  // AM Follow-Up (SEPARATE from task owner)
+  amFollowUp      Boolean   @default(false)
+  amFollowUpDate  DateTime?
+  amFollowUpNotes String?
+
+  // Deadline
+  deadline           DateTime?
+  deadlineStatus     String    @default("CONFIRMED")
+  deadlineConfidence String    @default("HIGH")
+
+  // Status & Priority
+  status    String @default("NOT_STARTED")
+  priority  String @default("MEDIUM")
+
+  // Computed flags (stored for query performance)
+  isOverdue         Boolean @default(false)
+  isDueSoon         Boolean @default(false)
+  isStale           Boolean @default(false)
+  isMissingDeadline Boolean @default(false)
+  isMissingOwner    Boolean @default(false)
+  isMissingNextStep Boolean @default(false)
+  isClientLevel     Boolean @default(false)
+
+  // Waiting tracking
+  waitingSince DateTime?
+  waitingFor   String?
+
+  // Stale / Last Confirmed
+  lastConfirmed       DateTime?
+  lastConfirmedSource String?
+
+  // Blocker
+  blockerDescription String?
+  dependency         String?
+
+  // Source traceability
+  source          String   @default("MANUAL")
+  sourceChannel   String?
+  sourceDate      DateTime?
+  sourceTimestamp String?
+  sourceMessage   String?
+  sourceLink      String?
+
+  // Completion
+  completionEvidence String?
+  completedDate      DateTime?
+
+  // Confidence
+  confidenceLevel String @default("HIGH")
+
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  history     OpenItemHistory[]
+  reviewItems ReviewItem[]
+
+  @@index([clientId])
+  @@index([vaId])
+  @@index([status])
+  @@index([priority])
+  @@index([isOverdue])
+  @@index([amFollowUp])
+  @@index([isMissingDeadline])
+  @@index([isMissingOwner])
+  @@index([deadline])
+}
+
+// ─── OPEN ITEM HISTORY (AUDIT TRAIL) ─────────────────────────────────────────
+
+model OpenItemHistory {
+  id           String   @id @default(cuid())
+  openItemId   String
+  openItem     OpenItem @relation(fields: [openItemId], references: [id], onDelete: Cascade)
+  changedAt    DateTime @default(now())
+  field        String
+  previousValue String?
+  newValue      String?
+  reason        String?
+  source        String?
+  sourceLink    String?
+  changedBy     String?
+  reviewItemId  String?
+
+  @@index([openItemId])
+  @@index([changedAt])
+}
+
+// ─── CLIENT HEALTH HISTORY ────────────────────────────────────────────────────
+
+model ClientHealthHistory {
+  id        String   @id @default(cuid())
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  changedAt DateTime @default(now())
+  fromHealth String
+  toHealth   String
+  reasons    String
+  source     String?
+
+  @@index([clientId])
+}
+
+// ─── SLACK ANALYSIS RUN ───────────────────────────────────────────────────────
+
+model SlackAnalysisRun {
+  id                    String   @id @default(cuid())
+  runDate               DateTime @default(now())
+  channelId             String?
+  channelName           String?
+  lastCursorTimestamp   String?
+  messagesAnalyzed      Int      @default(0)
+  itemsCreated          Int      @default(0)
+  itemsUpdated          Int      @default(0)
+  itemsCompleted        Int      @default(0)
+  itemsFlaggedForReview Int      @default(0)
+  gamePlansCreated      Int      @default(0)
+  status                String   @default("RUNNING")
+  errorLog              String?
+  completedAt           DateTime?
+
+  slackMessages SlackMessage[]
+  reviewItems   ReviewItem[]
+
+  @@index([status])
+  @@index([runDate])
+}
+
+// ─── SLACK MESSAGE ────────────────────────────────────────────────────────────
+
+model SlackMessage {
+  id              String           @id @default(cuid())
+  analysisRunId   String?
+  analysisRun     SlackAnalysisRun? @relation(fields: [analysisRunId], references: [id])
+  slackTimestamp  String
+  slackMessageId  String?
+  channelId       String?
+  channelName     String?
+  authorName      String?
+  authorId        String?
+  rawText         String
+  threadTs        String?
+  classification  String           @default("UNCLEAR")
+  processedAt     DateTime         @default(now())
+
+  @@unique([slackTimestamp, channelId])
+  @@index([channelId])
+  @@index([analysisRunId])
+}
+
+// ─── AI REVIEW QUEUE ──────────────────────────────────────────────────────────
+
+model ReviewItem {
+  id              String           @id @default(cuid())
+  analysisRunId   String?
+  analysisRun     SlackAnalysisRun? @relation(fields: [analysisRunId], references: [id])
+  openItemId      String?
+  openItem        OpenItem?        @relation(fields: [openItemId], references: [id])
+
+  reviewType      String
+  status          String           @default("PENDING")
+
+  aiInterpretation String
+  aiConfidence     String
+  proposedAction   String
+  proposedData     String
+
+  sourceMessage    String?
+  sourceTimestamp  String?
+  sourceLink       String?
+
+  reviewedBy      String?
+  reviewedAt      DateTime?
+  finalValue      String?
+  rejectionReason String?
+  notes           String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([reviewType])
+  @@index([openItemId])
+}
+
+// ─── DAILY SUMMARY ────────────────────────────────────────────────────────────
+
+model DailySummary {
+  id               String   @id @default(cuid())
+  date             DateTime @unique
+  newItems         Int      @default(0)
+  completedItems   Int      @default(0)
+  updatedItems     Int      @default(0)
+  overdueItems     Int      @default(0)
+  dueSoonItems     Int      @default(0)
+  missingDeadlines Int      @default(0)
+  missingOwners    Int      @default(0)
+  atRiskClients    Int      @default(0)
+  pendingReviews   Int      @default(0)
+  fullSummaryJson  String?
+  generatedAt      DateTime @default(now())
+
+  @@index([date])
+}
