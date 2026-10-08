@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils'
 import {
   LayoutDashboard, Users, UserCheck, ClipboardList, AlertCircle,
   Clock, FileText, GitBranch, Star, Eye, BarChart3, Zap, Search,
-  ChevronRight, Bell
+  ChevronRight, Bell, FlaskConical
 } from 'lucide-react'
 
 const navItems = [
@@ -19,6 +19,7 @@ const navItems = [
   { label: 'Review Queue', href: '/review', icon: Bell },
   { label: 'Daily Summary', href: '/daily-summary', icon: BarChart3 },
   { label: 'Game Plans', href: '/game-plans', icon: FileText },
+  { label: 'Slack Dry Run', href: '/slack-preview', icon: FlaskConical },
 ]
 
 export function Sidebar({ pendingReviews = 0 }: { pendingReviews?: number }) {

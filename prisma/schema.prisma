@@ -271,6 +271,17 @@ model ClientHealthHistory {
 
 // ─── SLACK ANALYSIS RUN ───────────────────────────────────────────────────────
 
+model SlackSyncConfig {
+  id          String    @id @default(cuid())
+  channelId   String    @unique
+  channelName String?
+  cursor      String?
+  isEnabled   Boolean   @default(false)
+  lastSyncAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
 model SlackAnalysisRun {
   id                    String   @id @default(cuid())
   runDate               DateTime @default(now())
@@ -278,11 +289,16 @@ model SlackAnalysisRun {
   channelName           String?
   lastCursorTimestamp   String?
   messagesAnalyzed      Int      @default(0)
+  messagesSkipped       Int      @default(0)
+  newItemsDetected      Int      @default(0)
+  updatesDetected       Int      @default(0)
+  completionsDetected   Int      @default(0)
   itemsCreated          Int      @default(0)
   itemsUpdated          Int      @default(0)
   itemsCompleted        Int      @default(0)
   itemsFlaggedForReview Int      @default(0)
   gamePlansCreated      Int      @default(0)
+  isDryRun              Boolean  @default(true)
   status                String   @default("RUNNING")
   errorLog              String?
   completedAt           DateTime?
@@ -337,6 +353,8 @@ model ReviewItem {
   sourceTimestamp  String?
   sourceLink       String?
 
+  isDryRun        Boolean  @default(false)
+
   reviewedBy      String?
   reviewedAt      DateTime?
   finalValue      String?
@@ -349,6 +367,7 @@ model ReviewItem {
   @@index([status])
   @@index([reviewType])
   @@index([openItemId])
+  @@index([isDryRun])
 }
 
 // ─── DAILY SUMMARY ────────────────────────────────────────────────────────────
