@@ -325,7 +325,7 @@ export default async function DashboardPage() {
                 <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-800">
                   <div className="flex items-center gap-2">
                     <Zap className="h-4 w-4 text-amber-500" />
-                    <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-50">Today's Summary</h2>
+                    <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-50">Today&apos;s Summary</h2>
                   </div>
                   <Link href="/daily-summary" className="text-xs font-medium text-slate-500 hover:text-slate-900 dark:hover:text-slate-50">
                     Full summary →

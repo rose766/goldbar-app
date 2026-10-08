@@ -193,7 +193,7 @@ export default async function ItemDetailPage({ params }: { params: { id: string 
               {item.sourceMessage && (
                 <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 dark:bg-slate-900 dark:border-slate-700">
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">Original Message</p>
-                  <p className="text-sm text-slate-700 dark:text-slate-300 italic">"{item.sourceMessage}"</p>
+                  <p className="text-sm text-slate-700 dark:text-slate-300 italic">&quot;{item.sourceMessage}&quot;</p>
                 </div>
               )}
               {item.sourceLink && (
