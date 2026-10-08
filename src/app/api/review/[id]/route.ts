@@ -24,6 +24,15 @@ export async function PATCH(
       return NextResponse.json({ error: 'Review item not found' }, { status: 404 })
     }
 
+    // Prevent double-processing: a second APPROVE on an already-approved item
+    // would create a duplicate OpenItem if no openItemId was linked yet.
+    if (reviewItem.status !== 'PENDING') {
+      return NextResponse.json(
+        { error: 'This proposal has already been reviewed. Reload to see its current status.' },
+        { status: 409 }
+      )
+    }
+
     const now = new Date()
 
     if (action === 'APPROVE' || action === 'EDIT_AND_APPROVE') {

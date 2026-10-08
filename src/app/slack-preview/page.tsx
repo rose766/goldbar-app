@@ -193,7 +193,13 @@ function ProposalCard({
           }}
         />
       )}
-      <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-5 space-y-4">
+      <div className="bg-zinc-900 border border-amber-700/40 rounded-xl p-5 space-y-4">
+        {/* DRY RUN banner — clearly marks this as a proposal, not a production record */}
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-950/60 border border-amber-700/50 rounded-lg">
+          <span className="text-amber-400 text-xs font-bold tracking-wide">PROPOSAL — NOT YET APPLIED</span>
+          <span className="text-amber-600 text-xs">· Approve to write to production</span>
+        </div>
+
         {/* Header */}
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2 flex-wrap">

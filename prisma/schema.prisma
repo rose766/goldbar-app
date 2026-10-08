@@ -368,6 +368,7 @@ model ReviewItem {
   @@index([reviewType])
   @@index([openItemId])
   @@index([isDryRun])
+  @@index([sourceTimestamp])
 }
 
 // ─── DAILY SUMMARY ────────────────────────────────────────────────────────────

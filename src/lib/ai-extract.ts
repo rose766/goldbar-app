@@ -71,6 +71,78 @@ export interface ExtractionContext {
   }>
 }
 
+// ─── Allowlists for server-side validation ──────────────────────────────────
+
+const VALID_ACTIONS = new Set<string>([
+  'CREATE_ITEM', 'UPDATE_ITEM', 'COMPLETE_ITEM', 'DEADLINE_CHANGE',
+  'OWNER_CHANGE', 'FLAG_BLOCKER', 'INFORMATIONAL', 'NEEDS_REVIEW',
+])
+
+const VALID_CONFIDENCES = new Set<string>(['HIGH', 'MEDIUM', 'NEEDS_REVIEW'])
+
+const VALID_REVIEW_TYPES = new Set<string>([
+  'POSSIBLE_DUPLICATE', 'MISSING_DEADLINE', 'UNCLEAR_OWNER', 'UNCLEAR_CLIENT',
+  'UNCLEAR_VA', 'POSSIBLE_COMPLETION', 'POSSIBLE_DEADLINE_CHANGE',
+  'CONFLICTING_INFORMATION', 'MEDIUM_CONFIDENCE_EXTRACTION', 'NEW_GAME_PLAN',
+  'PRIORITY_CHANGE',
+])
+
+// Validate and sanitize a raw AI proposal against the DB context
+function sanitizeProposal(
+  p: Partial<ExtractionProposal>,
+  context: ExtractionContext,
+  relevantMsg: SlackIngested
+): ExtractionProposal {
+  const clientIds = new Set(context.clients.map((c) => c.id))
+  const vaIds = new Set(context.vas.map((v) => v.id))
+  const itemIds = new Set(context.openItems.map((i) => i.id))
+
+  let confidence: 'HIGH' | 'MEDIUM' | 'NEEDS_REVIEW' = VALID_CONFIDENCES.has(p.confidence ?? '')
+    ? (p.confidence as 'HIGH' | 'MEDIUM' | 'NEEDS_REVIEW')
+    : 'NEEDS_REVIEW'
+
+  // Reject any clientId or vaId that wasn't in the provided context —
+  // guards against AI hallucinating IDs that don't exist in the database.
+  let clientId = typeof p.clientId === 'string' ? p.clientId : null
+  let vaId = typeof p.vaId === 'string' ? p.vaId : null
+
+  if (clientId && !clientIds.has(clientId)) {
+    clientId = null
+    confidence = 'NEEDS_REVIEW'
+  }
+  if (vaId && !vaIds.has(vaId)) {
+    vaId = null
+    confidence = 'NEEDS_REVIEW'
+  }
+
+  const proposedData = { ...(p.proposedData ?? {}) }
+
+  // Remove any openItemId that doesn't exist — prevents linking proposals to phantom items.
+  if (proposedData.openItemId && !itemIds.has(proposedData.openItemId)) {
+    delete proposedData.openItemId
+    confidence = 'NEEDS_REVIEW'
+  }
+
+  return {
+    action: VALID_ACTIONS.has(p.action ?? '') ? (p.action as ProposedAction) : 'NEEDS_REVIEW',
+    confidence,
+    reviewType: VALID_REVIEW_TYPES.has(p.reviewType ?? '')
+      ? p.reviewType!
+      : 'MEDIUM_CONFIDENCE_EXTRACTION',
+    clientName: typeof p.clientName === 'string' ? p.clientName : null,
+    clientId,
+    vaName: typeof p.vaName === 'string' ? p.vaName : null,
+    vaId,
+    proposedData,
+    aiInterpretation: typeof p.aiInterpretation === 'string' ? p.aiInterpretation.slice(0, 1000) : '',
+    reason: typeof p.reason === 'string' ? p.reason.slice(0, 1000) : '',
+    sourceMessage: relevantMsg.text,
+    sourceTimestamp: relevantMsg.ts,
+    sourceLink: relevantMsg.permalink,
+    authorName: relevantMsg.displayName,
+  }
+}
+
 // ─── System prompt ──────────────────────────────────────────────────────────
 
 function buildSystemPrompt(context: ExtractionContext): string {
@@ -89,6 +161,7 @@ CONSERVATIVE EXTRACTION RULES (strictly enforced):
 5. If you are uncertain about client, VA, or intent — use confidence "NEEDS_REVIEW".
 6. Prefer matching to an existing item (UPDATE) over creating a new one.
 7. Informational-only messages that require no action should use action "INFORMATIONAL".
+8. clientId and vaId MUST exactly match IDs from the provided context. If you cannot find an exact match, set them to null.
 
 CONFIDENCE LEVELS:
 - HIGH: Explicit, clear information. Client/VA clearly identified. Action unambiguous.
@@ -102,9 +175,9 @@ Return a JSON array of proposals. Each proposal must have ALL these fields:
   "confidence": "HIGH" | "MEDIUM" | "NEEDS_REVIEW",
   "reviewType": one of: "POSSIBLE_DUPLICATE" | "MISSING_DEADLINE" | "UNCLEAR_OWNER" | "UNCLEAR_CLIENT" | "UNCLEAR_VA" | "POSSIBLE_COMPLETION" | "POSSIBLE_DEADLINE_CHANGE" | "CONFLICTING_INFORMATION" | "MEDIUM_CONFIDENCE_EXTRACTION" | "NEW_GAME_PLAN" | "PRIORITY_CHANGE",
   "clientName": string or null,
-  "clientId": string or null (must match an existing client id from context),
+  "clientId": string or null (must exactly match an existing client id from context, or null),
   "vaName": string or null,
-  "vaId": string or null (must match an existing VA id from context),
+  "vaId": string or null (must exactly match an existing VA id from context, or null),
   "proposedData": {
     "title": string (required for CREATE_ITEM),
     "description": string or null,
@@ -116,7 +189,7 @@ Return a JSON array of proposals. Each proposal must have ALL these fields:
     "priority": "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" or null,
     "blockerDescription": string or null,
     "completionEvidence": string or null,
-    "openItemId": string or null (id of existing item this updates/completes)
+    "openItemId": string or null (id of existing item this updates/completes — must match context)
   },
   "aiInterpretation": "one sentence describing what you believe this message means",
   "reason": "one sentence explaining why you chose this action and confidence level"
@@ -165,30 +238,12 @@ export async function extractFromMessages(
 
     if (!Array.isArray(parsed)) return []
 
-    // Attach source traceability from the messages
     return parsed.map((p: Partial<ExtractionProposal>) => {
-      // Find the most relevant source message
       const relevantMsg = messages.find((m) => !m.isThreadReply) ?? messages[0]
-
-      return {
-        action: p.action ?? 'NEEDS_REVIEW',
-        confidence: p.confidence ?? 'NEEDS_REVIEW',
-        reviewType: p.reviewType ?? 'MEDIUM_CONFIDENCE_EXTRACTION',
-        clientName: p.clientName ?? null,
-        clientId: p.clientId ?? null,
-        vaName: p.vaName ?? null,
-        vaId: p.vaId ?? null,
-        proposedData: p.proposedData ?? {},
-        aiInterpretation: p.aiInterpretation ?? '',
-        reason: p.reason ?? '',
-        sourceMessage: relevantMsg.text,
-        sourceTimestamp: relevantMsg.ts,
-        sourceLink: relevantMsg.permalink,
-        authorName: relevantMsg.displayName,
-      } as ExtractionProposal
+      return sanitizeProposal(p, context, relevantMsg)
     })
   } catch (err) {
-    console.error('AI extraction error:', err)
+    console.error('AI extraction error:', err instanceof Error ? err.message : String(err))
     return []
   }
 }

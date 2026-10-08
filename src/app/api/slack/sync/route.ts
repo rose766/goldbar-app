@@ -11,7 +11,19 @@ const BATCH_SIZE = 15
 
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({}))
-  const isDryRun = body.isDryRun !== false // default true — always dry-run until explicitly set false
+
+  // Server-side gate: live sync is disabled unless SLACK_LIVE_SYNC_ENABLED=true is set.
+  // A client sending isDryRun:false cannot bypass this — the env var must be explicitly
+  // enabled by a human operator on the server before any production writes can occur.
+  const liveSyncEnabled = process.env.SLACK_LIVE_SYNC_ENABLED === 'true'
+  const requestedLiveSync = body.isDryRun === false
+  if (requestedLiveSync && !liveSyncEnabled) {
+    return NextResponse.json(
+      { error: 'Live sync is disabled. Set SLACK_LIVE_SYNC_ENABLED=true on the server to enable production writes.' },
+      { status: 403 }
+    )
+  }
+  const isDryRun = !liveSyncEnabled || !requestedLiveSync
 
   const channelId = process.env.SLACK_CHANNEL_ID
   if (!channelId) {
@@ -179,6 +191,7 @@ export async function POST(request: NextRequest) {
             sourceMessage: proposal.sourceMessage,
             sourceTimestamp: proposal.sourceTimestamp,
             sourceLink: proposal.sourceLink,
+            notes: proposal.authorName ? `Author: ${proposal.authorName}` : null,
           },
         })
 
