@@ -130,13 +130,13 @@ export default async function ClientDetailPage({ params }: { params: { id: strin
               </div>
             </div>
 
-            {/* Last Slack Sync */}
+            {/* Last Document Sync */}
             <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
-              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">Last Slack Sync</p>
+              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">Last Document Sync</p>
               <div className="flex items-center gap-1.5">
                 <RefreshCw className="h-4 w-4 text-slate-400" />
                 <span className="text-sm font-medium text-slate-900 dark:text-slate-50">
-                  {client.lastSlackSync ? formatRelative(client.lastSlackSync) : '—'}
+                  {client.lastDocumentSync ? formatRelative(client.lastDocumentSync) : '—'}
                 </span>
               </div>
             </div>
@@ -401,7 +401,7 @@ export default async function ClientDetailPage({ params }: { params: { id: strin
                     <p className="text-sm font-medium text-slate-900 dark:text-slate-50 truncate">{plan.title}</p>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
                       v{plan.version} · {formatDate(plan.date)}
-                      {plan.sourceChannel && ` · #${plan.sourceChannel}`}
+                      {plan.sourceLink && ` · (source)`}
                     </p>
                   </div>
                   <span className="ml-4 shrink-0 text-xs font-medium text-slate-500 dark:text-slate-400">

@@ -12,7 +12,7 @@ export async function POST() {
     const items = await prisma.openItem.findMany({
       where: { status: { notIn: ['COMPLETED', 'CANCELLED'] } },
       include: {
-        client: { select: { staleThresholdDays: true, lastSlackSync: true } },
+        client: { select: { staleThresholdDays: true } },
       },
     })
 
@@ -111,7 +111,7 @@ export async function POST() {
         performanceFlagCount,
         repeatedMissedCommitments: 0,
         pendingReviewCount,
-        lastSlackSync: client.lastSlackSync,
+        lastSlackSync: null,
       })
 
       const oldHealth = client.health

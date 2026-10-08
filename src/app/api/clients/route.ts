@@ -51,7 +51,7 @@ export async function GET() {
         amAttentionCount,
         nextCheckIn: client.nextCheckIn,
         lastActivity: client.lastActivity,
-        lastSlackSync: client.lastSlackSync,
+        lastDocumentSync: client.lastDocumentSync,
         accountManager: client.accountManager,
       }
     })

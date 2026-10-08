@@ -23,7 +23,7 @@ export function TopBar({ title, subtitle, lastSync, syncStatus = 'never' }: TopB
     ok: `Last synced: ${formatDate(lastSync, 'MMM d, yyyy')} at ${lastSync ? new Date(lastSync).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}`,
     stale: `⚠️ Sync data is stale — last: ${formatDate(lastSync)}`,
     failed: `🔴 Sync FAILED — data may be outdated`,
-    never: 'Slack not yet synced',
+    never: 'No documents processed yet',
   }
 
   return (

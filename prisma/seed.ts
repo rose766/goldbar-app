@@ -21,7 +21,6 @@ async function main() {
       ]),
       nextCheckIn: addDays(today, 3),
       lastActivity: subDays(today, 2),
-      lastSlackSync: subHours(today, 4),
       lastItemUpdate: subDays(today, 2),
       lastConfirmedActivity: subDays(today, 6),
       staleThresholdDays: 5,
@@ -53,9 +52,6 @@ async function main() {
       keyObjectives: '1. CRM cleanup and automation\n2. Email inbox zero system\n3. Lead response SLA improvement',
       keyCommitments: 'Client to provide CRM access by Oct 5. VA to complete audit by Oct 12.',
       nextSteps: 'Rose to follow up on CRM access. Maria to begin audit once access is granted.',
-      sourceSlackMessage: 'Game plan shared in channel on Sept 8. PDF attached.',
-      sourceChannel: 'account-management',
-      sourceDate: subDays(today, 30),
     },
   })
 
@@ -135,7 +131,6 @@ async function main() {
       waitingFor: 'CRM credentials from John (CEO)',
       lastConfirmed: subDays(today, 6),
       source: 'GAME_PLAN',
-      sourceChannel: 'account-management',
       sourceDate: subDays(today, 30),
       sourceMessage: 'John confirmed he will send CRM access by Oct 5. Game plan slide 3.',
       confidenceLevel: 'HIGH',
@@ -160,7 +155,6 @@ async function main() {
       isDueSoon: true,
       lastConfirmed: subDays(today, 1),
       source: 'SLACK',
-      sourceChannel: 'account-management',
       sourceDate: subDays(today, 7),
       sourceMessage: 'Rose: Maria is working on the email SOP, target Oct 12.',
       confidenceLevel: 'HIGH',
@@ -205,7 +199,6 @@ async function main() {
       isMissingDeadline: true,
       confidenceLevel: 'HIGH',
       source: 'SLACK',
-      sourceChannel: 'account-management',
       sourceDate: subDays(today, 5),
       sourceMessage: 'Client flagged lead response time in last check-in. Needs improvement.',
     },
@@ -227,7 +220,6 @@ async function main() {
       ]),
       nextCheckIn: addDays(today, 1),
       lastActivity: subDays(today, 8),
-      lastSlackSync: subHours(today, 4),
       lastItemUpdate: subDays(today, 8),
       lastConfirmedActivity: subDays(today, 8),
       staleThresholdDays: 5,
@@ -271,8 +263,6 @@ async function main() {
       summary: 'Full operational setup for BlueSky. Two-VA team to cover executive support and ops management.',
       keyObjectives: '1. Complete onboarding for both VAs\n2. Establish vendor management process\n3. Set up travel booking SOP',
       keyCommitments: 'Client to share vendor list by Sept 25. James to complete travel SOP by Oct 1.',
-      sourceChannel: 'account-management',
-      sourceDate: subDays(today, 45),
     },
   })
 
@@ -284,8 +274,6 @@ async function main() {
       status: 'SUPERSEDED',
       date: subDays(today, 60),
       summary: 'Initial onboarding plan. Superseded when second VA was added.',
-      sourceChannel: 'account-management',
-      sourceDate: subDays(today, 60),
       previousVersionId: null,
     },
   })
@@ -317,7 +305,6 @@ async function main() {
       waitingFor: 'James to begin and complete SOP',
       lastConfirmed: subDays(today, 14),
       source: 'GAME_PLAN',
-      sourceChannel: 'account-management',
       sourceDate: subDays(today, 45),
       sourceMessage: 'Game plan commitment: James to complete travel SOP by Oct 1.',
       confidenceLevel: 'HIGH',
@@ -448,7 +435,6 @@ async function main() {
       healthReasons: JSON.stringify(['All items on track', 'Active updates from VA team']),
       nextCheckIn: addDays(today, 7),
       lastActivity: subDays(today, 1),
-      lastSlackSync: subHours(today, 4),
       lastItemUpdate: subDays(today, 1),
       lastConfirmedActivity: subDays(today, 1),
       staleThresholdDays: 5,
@@ -503,8 +489,6 @@ async function main() {
       summary: 'Full-team Q4 plan covering investor relations, operational efficiency, and new market research.',
       keyObjectives: '1. Board meeting preparation\n2. Operational cost analysis\n3. New market opportunity research',
       keyCommitments: 'All VAs to submit weekly updates every Friday. David to deliver market research by Oct 20.',
-      sourceChannel: 'account-management',
-      sourceDate: subDays(today, 14),
       lastReviewed: subDays(today, 1),
     },
   })
@@ -745,22 +729,6 @@ async function main() {
         newToday: ['BlueSky: Contract review checklist added', 'Apex: QBR scheduling added'],
       }),
       generatedAt: today,
-    },
-  })
-
-  // ─── Last Slack Analysis Run ──────────────────────────────────────────────
-  await prisma.slackAnalysisRun.create({
-    data: {
-      runDate: subHours(today, 4),
-      channelId: 'C_PLACEHOLDER',
-      channelName: 'account-management',
-      messagesAnalyzed: 18,
-      itemsCreated: 2,
-      itemsUpdated: 4,
-      itemsCompleted: 1,
-      itemsFlaggedForReview: 3,
-      status: 'COMPLETED',
-      completedAt: subHours(today, 4),
     },
   })
 

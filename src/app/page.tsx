@@ -18,7 +18,7 @@ async function getDashboardData() {
   const [
     clients, totalVAs, openItems, overdueItems, dueSoonItems, blockedItems,
     missingDeadlines, missingOwners, myFollowUps, pendingReviews,
-    staleItems, latestRun, dailySummary
+    staleItems, dailySummary
   ] = await Promise.all([
     prisma.client.findMany({ where: { status: 'ACTIVE' }, include: { vas: true, openItems: { where: { status: { notIn: ['COMPLETED', 'CANCELLED'] } } } } }),
     prisma.vA.count({ where: { status: 'ACTIVE' } }),
@@ -31,17 +31,10 @@ async function getDashboardData() {
     prisma.openItem.count({ where: { amFollowUp: true, status: { notIn: ['COMPLETED', 'CANCELLED'] } } }),
     prisma.reviewItem.count({ where: { status: 'PENDING' } }),
     prisma.openItem.count({ where: { isStale: true, status: { notIn: ['COMPLETED', 'CANCELLED'] } } }),
-    prisma.slackAnalysisRun.findFirst({ orderBy: { runDate: 'desc' } }),
     prisma.dailySummary.findFirst({ where: { date: { gte: new Date(today.toDateString()) } } }),
   ])
 
-  // Sync status
-  let syncStatus: 'ok' | 'stale' | 'failed' | 'never' = 'never'
-  if (latestRun) {
-    if (latestRun.status === 'FAILED') syncStatus = 'failed'
-    else if (differenceInDays(today, latestRun.runDate) >= 2) syncStatus = 'stale'
-    else syncStatus = 'ok'
-  }
+  const syncStatus: 'never' = 'never'
 
   // Client summaries
   const atRiskClients = clients.filter(c => c.health === 'AT_RISK')
@@ -80,7 +73,7 @@ async function getDashboardData() {
     topOverdue,
     topFollowUps,
     syncStatus,
-    lastSync: latestRun?.runDate ?? null,
+    lastSync: null as Date | null,
     dailySummary,
     allClients: clients,
   }

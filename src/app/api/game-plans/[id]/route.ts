@@ -79,11 +79,8 @@ export async function PATCH(
           keyObjectives: body.keyObjectives ?? existing.keyObjectives,
           keyCommitments: body.keyCommitments ?? existing.keyCommitments,
           nextSteps: body.nextSteps ?? existing.nextSteps,
-          sourceSlackMessage: body.sourceSlackMessage ?? existing.sourceSlackMessage,
+          sourceExcerpt: body.sourceExcerpt ?? existing.sourceExcerpt,
           sourceLink: body.sourceLink ?? existing.sourceLink,
-          sourceChannel: body.sourceChannel ?? existing.sourceChannel,
-          sourceDate: body.sourceDate ? new Date(body.sourceDate) : existing.sourceDate,
-          sourceTimestamp: body.sourceTimestamp ?? existing.sourceTimestamp,
           notes: body.notes ?? existing.notes,
           previousVersionId: params.id,
         },
@@ -93,14 +90,12 @@ export async function PATCH(
       const updateData: Record<string, unknown> = {}
       const fields = [
         'title', 'status', 'summary', 'keyObjectives', 'keyCommitments',
-        'nextSteps', 'sourceSlackMessage', 'sourceLink', 'sourceChannel',
-        'sourceTimestamp', 'notes',
+        'nextSteps', 'sourceExcerpt', 'sourceLink', 'notes',
       ]
       for (const f of fields) {
         if (f in body) updateData[f] = body[f]
       }
       if ('date' in body) updateData.date = new Date(body.date)
-      if ('sourceDate' in body) updateData.sourceDate = body.sourceDate ? new Date(body.sourceDate) : null
       if ('lastReviewed' in body) updateData.lastReviewed = body.lastReviewed ? new Date(body.lastReviewed) : null
 
       updatedPlan = await prisma.gamePlan.update({

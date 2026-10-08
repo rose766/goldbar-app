@@ -23,7 +23,7 @@ export async function GET() {
       needsAttentionClients,
       pendingReviews,
       staleItems,
-      lastRun,
+      lastDocSync,
     ] = await Promise.all([
       prisma.client.count({ where: { status: 'ACTIVE' } }),
       prisma.vA.count({ where: { status: 'ACTIVE' } }),
@@ -54,24 +54,15 @@ export async function GET() {
       prisma.openItem.count({
         where: { isStale: true, status: { notIn: ['COMPLETED', 'CANCELLED'] } },
       }),
-      prisma.slackAnalysisRun.findFirst({
-        orderBy: { runDate: 'desc' },
-        select: { runDate: true, status: true },
+      prisma.sourceDocument.findFirst({
+        orderBy: { lastProcessedAt: 'desc' },
+        select: { lastProcessedAt: true, processingStatus: true },
+        where: { lastProcessedAt: { not: null } },
       }),
     ])
 
-    let syncStatus: 'ok' | 'stale' | 'failed' | 'never' = 'never'
-    let lastSync: Date | null = null
-
-    if (lastRun) {
-      lastSync = lastRun.runDate
-      if (lastRun.status === 'FAILED') {
-        syncStatus = 'failed'
-      } else {
-        const hoursSinceSync = (now.getTime() - lastRun.runDate.getTime()) / (1000 * 60 * 60)
-        syncStatus = hoursSinceSync > 24 ? 'stale' : 'ok'
-      }
-    }
+    const syncStatus: 'ok' | 'never' = lastDocSync ? 'ok' : 'never'
+    const lastSync: Date | null = lastDocSync?.lastProcessedAt ?? null
 
     return NextResponse.json({
       totalClients,

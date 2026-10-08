@@ -2,7 +2,22 @@
 // Conservative: never auto-applies anything. All proposals go to ReviewItem.
 
 import Anthropic from '@anthropic-ai/sdk'
-import type { SlackIngested } from './slack'
+// SlackIngested type was part of the Slack integration (now removed)
+export interface SlackIngested {
+  id: string
+  ts: string
+  text: string
+  userId?: string
+  userName?: string
+  displayName?: string
+  channelId: string
+  channelName: string
+  parentTs?: string
+  isThread: boolean
+  isThreadReply?: boolean
+  threadTs?: string
+  permalink?: string
+}
 
 const client = new Anthropic()
 
@@ -51,8 +66,8 @@ export interface ExtractionProposal {
   // Source traceability
   sourceMessage: string
   sourceTimestamp: string
-  sourceLink: string
-  authorName: string
+  sourceLink: string | null
+  authorName: string | null
 }
 
 export interface ExtractionContext {
@@ -138,8 +153,8 @@ function sanitizeProposal(
     reason: typeof p.reason === 'string' ? p.reason.slice(0, 1000) : '',
     sourceMessage: relevantMsg.text,
     sourceTimestamp: relevantMsg.ts,
-    sourceLink: relevantMsg.permalink,
-    authorName: relevantMsg.displayName,
+    sourceLink: relevantMsg.permalink ?? null,
+    authorName: relevantMsg.displayName ?? null,
   }
 }
 

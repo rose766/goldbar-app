@@ -4,9 +4,10 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import {
-  LayoutDashboard, Users, UserCheck, ClipboardList, AlertCircle,
-  Clock, FileText, GitBranch, Star, Eye, BarChart3, Zap, Search,
-  ChevronRight, Bell, FlaskConical
+  LayoutDashboard, Users, AlertCircle,
+  Clock, FileText, GitBranch, Star,
+  BarChart3,
+  ChevronRight, Bell, Upload
 } from 'lucide-react'
 
 const navItems = [
@@ -19,7 +20,7 @@ const navItems = [
   { label: 'Review Queue', href: '/review', icon: Bell },
   { label: 'Daily Summary', href: '/daily-summary', icon: BarChart3 },
   { label: 'Game Plans', href: '/game-plans', icon: FileText },
-  { label: 'Slack Control Center', href: '/slack-preview', icon: FlaskConical },
+  { label: 'Documents', href: '/documents', icon: Upload },
 ]
 
 export function Sidebar({ pendingReviews = 0 }: { pendingReviews?: number }) {

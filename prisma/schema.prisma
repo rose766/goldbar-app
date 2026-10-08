@@ -19,7 +19,7 @@ model Client {
   nextCheckIn           DateTime?
   lastActivity          DateTime?
   lastDashboardUpdate   DateTime?
-  lastSlackSync         DateTime?
+  lastDocumentSync      DateTime?     // last time a document was processed for this client
   lastItemUpdate        DateTime?
   lastConfirmedActivity DateTime?
   staleThresholdDays    Int           @default(5)
@@ -31,6 +31,7 @@ model Client {
   openItems             OpenItem[]
   gamePlans             GamePlan[]
   healthHistory         ClientHealthHistory[]
+  sourceDocuments       SourceDocument[]
 
   @@index([health])
   @@index([status])
@@ -61,39 +62,103 @@ model VA {
   @@index([status])
 }
 
-// ─── GAME PLAN / SOURCE DOCUMENT ──────────────────────────────────────────────
+// ─── SOURCE DOCUMENT ──────────────────────────────────────────────────────────
+// Primary input object. Created by Lindy intake or manual upload.
+// AI analysis produces ReviewItems; approved ReviewItems become OpenItems.
 
-model GamePlan {
+model SourceDocument {
   id                String    @id @default(cuid())
-  clientId          String
-  client            Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  clientId          String?   // nullable until client is identified
+  client            Client?   @relation(fields: [clientId], references: [id])
+
+  // Identification
   title             String
-  version           Int       @default(1)
-  status            String    @default("ACTIVE")
-  date              DateTime
-  summary           String?
-  keyObjectives     String?
-  keyCommitments    String?
-  nextSteps         String?
-  sourceSlackMessage String?
-  sourceLink        String?
-  sourceChannel     String?
-  sourceDate        DateTime?
-  sourceTimestamp   String?
-  lastReviewed      DateTime?
-  notes             String?
+  fileName          String
+  fileType          String    // pptx | pdf | docx | txt | md | google-doc
+  sourceType        String    @default("LINDY")  // GOOGLE_DRIVE | LINDY | MANUAL
+
+  // Google Drive
+  googleDriveFileId String?   // for deduplication
+  googleDriveUrl    String?
+
+  // Versioning
+  documentVersion   String?   // e.g. "v2", "Q4 v2"
+  contentHash       String?   // SHA-256 of extractedText for dedup
+
+  // Previous version chain
+  previousVersionId String?
+  previousVersion   SourceDocument?  @relation("DocVersions", fields: [previousVersionId], references: [id])
+  laterVersions     SourceDocument[] @relation("DocVersions")
+
+  // Content
+  extractedText     String?   // full text extracted from document
+  summary           String?   // AI-generated summary
+
+  // Timing
+  uploadedAt        DateTime? // when file was uploaded to Drive
+  receivedAt        DateTime  @default(now())
+  lastProcessedAt   DateTime?
+
+  // Processing state: RECEIVED | EXTRACTING | ANALYZING | READY_FOR_REVIEW | PROCESSED | FAILED
+  processingStatus  String    @default("RECEIVED")
+  processingError   String?
+
+  // Stats
+  proposalsCreated  Int       @default(0)
+  proposalsApproved Int       @default(0)
+  proposalsRejected Int       @default(0)
+  itemsCreated      Int       @default(0)
+
+  // Raw intake payload (JSON blob from Lindy)
+  rawMetadata       String?
+
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
-  previousVersionId String?
-  previousVersion   GamePlan? @relation("GamePlanVersions", fields: [previousVersionId], references: [id])
-  laterVersions     GamePlan[] @relation("GamePlanVersions")
-
-  objectives        Objective[]
+  reviewItems       ReviewItem[]
+  gamePlans         GamePlan[]
   openItems         OpenItem[]
 
   @@index([clientId])
+  @@index([googleDriveFileId])
+  @@index([processingStatus])
+  @@index([sourceType])
+  @@index([contentHash])
+}
+
+// ─── GAME PLAN ────────────────────────────────────────────────────────────────
+
+model GamePlan {
+  id                 String    @id @default(cuid())
+  clientId           String
+  client             Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  sourceDocumentId   String?   // FK to SourceDocument that generated this game plan
+  sourceDocument     SourceDocument? @relation(fields: [sourceDocumentId], references: [id])
+  title              String
+  version            Int       @default(1)
+  status             String    @default("ACTIVE")
+  date               DateTime
+  summary            String?
+  keyObjectives      String?
+  keyCommitments     String?
+  nextSteps          String?
+  sourceExcerpt      String?   // relevant text excerpt from source document
+  sourceLink         String?   // Google Drive URL or other source link
+  lastReviewed       DateTime?
+  notes              String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  previousVersionId  String?
+  previousVersion    GamePlan? @relation("GamePlanVersions", fields: [previousVersionId], references: [id])
+  laterVersions      GamePlan[] @relation("GamePlanVersions")
+
+  objectives         Objective[]
+  openItems          OpenItem[]
+
+  @@index([clientId])
   @@index([status])
+  @@index([sourceDocumentId])
 }
 
 // ─── OBJECTIVE ────────────────────────────────────────────────────────────────
@@ -144,17 +209,19 @@ model Milestone {
 // ─── OPEN ITEM ────────────────────────────────────────────────────────────────
 
 model OpenItem {
-  id           String     @id @default(cuid())
-  clientId     String
-  client       Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  vaId         String?
-  va           VA?        @relation(fields: [vaId], references: [id])
-  gamePlanId   String?
-  gamePlan     GamePlan?  @relation(fields: [gamePlanId], references: [id])
-  objectiveId  String?
-  objective    Objective? @relation(fields: [objectiveId], references: [id])
-  milestoneId  String?
-  milestone    Milestone? @relation(fields: [milestoneId], references: [id])
+  id               String     @id @default(cuid())
+  clientId         String
+  client           Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  vaId             String?
+  va               VA?        @relation(fields: [vaId], references: [id])
+  gamePlanId       String?
+  gamePlan         GamePlan?  @relation(fields: [gamePlanId], references: [id])
+  objectiveId      String?
+  objective        Objective? @relation(fields: [objectiveId], references: [id])
+  milestoneId      String?
+  milestone        Milestone? @relation(fields: [milestoneId], references: [id])
+  sourceDocumentId String?
+  sourceDocument   SourceDocument? @relation(fields: [sourceDocumentId], references: [id])
 
   // Core
   title        String
@@ -166,7 +233,7 @@ model OpenItem {
   ownerType         String  @default("UNASSIGNED")
   ownerConfidence   String  @default("HIGH")
 
-  // AM Follow-Up (SEPARATE from task owner)
+  // AM Follow-Up (SEPARATE from task owner — the AM responsible for following up)
   amFollowUp      Boolean   @default(false)
   amFollowUpDate  DateTime?
   amFollowUpNotes String?
@@ -203,11 +270,9 @@ model OpenItem {
 
   // Source traceability
   source          String   @default("MANUAL")
-  sourceChannel   String?
   sourceDate      DateTime?
-  sourceTimestamp String?
-  sourceMessage   String?
-  sourceLink      String?
+  sourceMessage   String?  // excerpt from source document
+  sourceLink      String?  // Google Drive URL
 
   // Completion
   completionEvidence String?
@@ -232,6 +297,7 @@ model OpenItem {
   @@index([isMissingDeadline])
   @@index([isMissingOwner])
   @@index([deadline])
+  @@index([sourceDocumentId])
 }
 
 // ─── OPEN ITEM HISTORY (AUDIT TRAIL) ─────────────────────────────────────────
@@ -269,151 +335,30 @@ model ClientHealthHistory {
   @@index([clientId])
 }
 
-// ─── SLACK WORKSPACE ──────────────────────────────────────────────────────────
-
-model SlackWorkspace {
-  id                 String        @id @default(cuid())
-  teamId             String        @unique
-  teamName           String?
-  teamDomain         String?
-  botUserId          String?
-  totalChannels      Int           @default(0)
-  accessibleChannels Int           @default(0)
-  lastDiscoveredAt   DateTime?
-  lastSyncAt         DateTime?
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
-
-  channels           SlackChannel[]
-}
-
-// ─── SLACK CHANNEL (per-channel config + cursor + stats) ─────────────────────
-
-model SlackChannel {
-  id                   String          @id @default(cuid())
-  workspaceId          String?
-  workspace            SlackWorkspace? @relation(fields: [workspaceId], references: [id])
-  slackChannelId       String          @unique
-  channelName          String?
-  channelType          String          @default("PUBLIC")
-  isPrivate            Boolean         @default(false)
-  isArchived           Boolean         @default(false)
-  isMember             Boolean         @default(false)
-  isAccessible         Boolean         @default(true)
-
-  enabled              Boolean         @default(true)
-  ingestionEnabled     Boolean         @default(false)
-  analysisEnabled      Boolean         @default(false)
-
-  // Classification: CLIENT | INTERNAL | OPERATIONS | STAFFING | HR | LEADERSHIP | TRAINING | SOCIAL | OTHER | EXCLUDED
-  classification       String          @default("OTHER")
-
-  cursor               String?
-  lastSyncAt           DateTime?
-  lastSuccessfulSyncAt DateTime?
-  lastError            String?
-
-  messagesAnalyzed     Int             @default(0)
-  messagesSkipped      Int             @default(0)
-  totalMessages        Int             @default(0)
-
-  createdAt            DateTime        @default(now())
-  updatedAt            DateTime        @updatedAt
-
-  messages             SlackMessage[]
-  analysisRuns         SlackAnalysisRun[]
-
-  @@index([workspaceId])
-  @@index([classification])
-  @@index([ingestionEnabled])
-  @@index([analysisEnabled])
-  @@index([isArchived])
-}
-
-// ─── SLACK ANALYSIS RUN ───────────────────────────────────────────────────────
-
-model SlackAnalysisRun {
-  id                    String       @id @default(cuid())
-  runDate               DateTime     @default(now())
-  slackChannelDbId      String?
-  slackChannel          SlackChannel? @relation(fields: [slackChannelDbId], references: [id])
-  channelId             String?
-  channelName           String?
-  lastCursorTimestamp   String?
-  messagesAnalyzed      Int          @default(0)
-  messagesSkipped       Int          @default(0)
-  newItemsDetected      Int          @default(0)
-  updatesDetected       Int          @default(0)
-  completionsDetected   Int          @default(0)
-  itemsCreated          Int          @default(0)
-  itemsUpdated          Int          @default(0)
-  itemsCompleted        Int          @default(0)
-  itemsFlaggedForReview Int          @default(0)
-  gamePlansCreated      Int          @default(0)
-  isDryRun              Boolean      @default(true)
-  status                String       @default("RUNNING")
-  errorLog              String?
-  completedAt           DateTime?
-
-  slackMessages SlackMessage[]
-  reviewItems   ReviewItem[]
-
-  @@index([status])
-  @@index([runDate])
-  @@index([slackChannelDbId])
-}
-
-// ─── SLACK MESSAGE ────────────────────────────────────────────────────────────
-
-model SlackMessage {
-  id               String            @id @default(cuid())
-  analysisRunId    String?
-  analysisRun      SlackAnalysisRun? @relation(fields: [analysisRunId], references: [id])
-  slackChannelDbId String?
-  slackChannel     SlackChannel?     @relation(fields: [slackChannelDbId], references: [id])
-  slackTimestamp   String
-  slackMessageId   String?
-  channelId        String?
-  channelName      String?
-  authorName       String?
-  authorId         String?
-  rawText          String
-  threadTs         String?
-  permalink        String?
-  postedAt         DateTime?
-  classification   String            @default("UNCLEAR")
-  processedAt      DateTime          @default(now())
-
-  @@unique([slackTimestamp, channelId])
-  @@index([channelId])
-  @@index([analysisRunId])
-  @@index([slackChannelDbId])
-  @@index([processedAt])
-}
-
 // ─── AI REVIEW QUEUE ──────────────────────────────────────────────────────────
 
 model ReviewItem {
-  id              String           @id @default(cuid())
-  analysisRunId   String?
-  analysisRun     SlackAnalysisRun? @relation(fields: [analysisRunId], references: [id])
-  openItemId      String?
-  openItem        OpenItem?        @relation(fields: [openItemId], references: [id])
+  id               String          @id @default(cuid())
+  sourceDocumentId String?
+  sourceDocument   SourceDocument? @relation(fields: [sourceDocumentId], references: [id])
+  openItemId       String?
+  openItem         OpenItem?       @relation(fields: [openItemId], references: [id])
 
-  reviewType      String
-  status          String           @default("PENDING")
+  reviewType       String
+  status           String          @default("PENDING")
 
   aiInterpretation String
   aiConfidence     String
   proposedAction   String
-  proposedData     String
+  proposedData     String          // JSON blob
 
-  sourceMessage    String?
+  // Source traceability
+  sourceMessage    String?         // relevant excerpt from document
   sourceTimestamp  String?
-  sourceLink       String?
+  sourceLink       String?         // Google Drive URL
 
+  // Confidence and review metadata
   isDryRun        Boolean  @default(false)
-
   reviewedBy      String?
   reviewedAt      DateTime?
   finalValue      String?
@@ -427,7 +372,7 @@ model ReviewItem {
   @@index([reviewType])
   @@index([openItemId])
   @@index([isDryRun])
-  @@index([sourceTimestamp])
+  @@index([sourceDocumentId])
 }
 
 // ─── DAILY SUMMARY ────────────────────────────────────────────────────────────

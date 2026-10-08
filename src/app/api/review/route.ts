@@ -18,7 +18,7 @@ export async function GET() {
               va: { select: { id: true, name: true } },
             },
           },
-          analysisRun: { select: { id: true, runDate: true, channelName: true } },
+          sourceDocument: { select: { id: true, title: true, sourceType: true } },
         },
         orderBy: { createdAt: 'desc' },
       }),

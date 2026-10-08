@@ -89,8 +89,8 @@ async function getPendingReviews() {
           va: { select: { name: true } },
         },
       },
-      analysisRun: {
-        select: { id: true, runDate: true, channelName: true, status: true },
+      sourceDocument: {
+        select: { id: true, title: true, sourceType: true },
       },
     },
   })
@@ -187,7 +187,7 @@ export default async function ReviewPage() {
                         <div className="mt-1.5 flex items-center gap-2 text-xs text-slate-400">
                           {review.sourceTimestamp && (
                             <span className="flex items-center gap-1">
-                              <span>{formatDate(new Date(parseFloat(review.sourceTimestamp) * 1000))}</span>
+                              <span>{review.sourceTimestamp}</span>
                             </span>
                           )}
                           {review.sourceLink && (
@@ -198,18 +198,18 @@ export default async function ReviewPage() {
                               className="flex items-center gap-0.5 text-blue-500 hover:text-blue-600 dark:text-blue-400"
                             >
                               <ExternalLink className="h-3 w-3" />
-                              View in Slack
+                              View source
                             </a>
                           )}
                         </div>
                       </div>
                     )}
 
-                    {/* Analysis run info */}
-                    {review.analysisRun && (
+                    {/* Source document info */}
+                    {review.sourceDocument && (
                       <div className="rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800 px-3 py-2 text-xs text-slate-500 dark:text-slate-400">
-                        Analysis run {formatDate(review.analysisRun.runDate)}
-                        {review.analysisRun.channelName && ` · #${review.analysisRun.channelName}`}
+                        From: {review.sourceDocument.title}
+                        <span className="ml-2 text-slate-400">{review.sourceDocument.sourceType}</span>
                       </div>
                     )}
                   </div>

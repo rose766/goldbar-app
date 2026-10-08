@@ -133,11 +133,12 @@ export default async function GamePlanDetailPage({ params }: { params: { id: str
                     <p className="text-slate-900 dark:text-slate-50">{formatRelative(plan.lastReviewed)}</p>
                   </div>
                 )}
-                {plan.sourceChannel && (
+                {plan.sourceLink && (
                   <div>
                     <p className="text-xs text-slate-400">Source</p>
-                    <p className="text-slate-500 text-xs">{plan.sourceChannel}</p>
-                    {plan.sourceDate && <p className="text-xs text-slate-400">{formatDate(plan.sourceDate)}</p>}
+                    <a href={plan.sourceLink} target="_blank" rel="noreferrer" className="text-xs text-blue-500 hover:underline truncate block max-w-xs">
+                      View source
+                    </a>
                   </div>
                 )}
               </div>

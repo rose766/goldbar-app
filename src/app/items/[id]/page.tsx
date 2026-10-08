@@ -186,9 +186,8 @@ export default async function ItemDetailPage({ params }: { params: { id: string 
               </h2>
               <div className="grid grid-cols-2 gap-4 mb-3">
                 <FieldRow label="Source" value={item.source} />
-                <FieldRow label="Channel" value={item.sourceChannel} />
+                <FieldRow label="Source" value={item.source} />
                 <FieldRow label="Source Date" value={item.sourceDate ? formatDate(item.sourceDate) : null} />
-                <FieldRow label="Source Timestamp" value={item.sourceTimestamp} />
               </div>
               {item.sourceMessage && (
                 <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 dark:bg-slate-900 dark:border-slate-700">
