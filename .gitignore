@@ -40,6 +40,9 @@ prisma/dev.db
 prisma/dev.db-journal
 prisma/*.db
 
+# confidential data export — never commit
+prisma/restore-data.json
+
 # vercel
 .vercel
 
