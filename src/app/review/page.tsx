@@ -175,7 +175,7 @@ export default async function ReviewPage() {
 
                   {/* Right column */}
                   <div className="space-y-4">
-                    {/* Original Slack message */}
+                    {/* Source excerpt from document */}
                     {review.sourceMessage && (
                       <div>
                         <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1.5">

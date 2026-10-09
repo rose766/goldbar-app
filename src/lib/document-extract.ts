@@ -49,8 +49,7 @@ async function extractPptx(buffer: Buffer): Promise<ExtractedDocument> {
 // ─── PDF ─────────────────────────────────────────────────────────────────────
 
 async function extractPdf(buffer: Buffer): Promise<ExtractedDocument> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const pdfModule = await import('pdf-parse') as any
+  const pdfModule = await import('pdf-parse') as any // pdf-parse has no proper ESM types
   const pdfParse = pdfModule.default ?? pdfModule
   const data = await pdfParse(buffer)
   const text = data.text ?? ''

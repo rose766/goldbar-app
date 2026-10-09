@@ -16,6 +16,11 @@ export async function POST(req: NextRequest) {
   const file = formData.get('file') as File | null
   if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 })
 
+  const MAX_BYTES = 10 * 1024 * 1024 // 10 MB
+  if (file.size > MAX_BYTES) {
+    return NextResponse.json({ error: 'File too large (max 10 MB)' }, { status: 413 })
+  }
+
   const clientId = (formData.get('clientId') as string | null) ?? null
   const title = (formData.get('title') as string | null) ?? file.name.replace(/\.[^.]+$/, '')
 
@@ -34,16 +39,19 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  // Duplicate check by hash
-  const existing = await prisma.sourceDocument.findFirst({
-    where: { contentHash: extracted.contentHash },
-  })
-  if (existing) {
-    return NextResponse.json({
-      duplicate: true,
-      message: 'Identical document already exists',
-      existingDocumentId: existing.id,
+  // Duplicate check by hash (skip for empty extractions — scanned PDFs all hash the same)
+  const emptyExtraction = extracted.text.trim().length === 0
+  if (!emptyExtraction) {
+    const existing = await prisma.sourceDocument.findFirst({
+      where: { contentHash: extracted.contentHash },
     })
+    if (existing) {
+      return NextResponse.json({
+        duplicate: true,
+        message: 'Identical document already exists',
+        existingDocumentId: existing.id,
+      })
+    }
   }
 
   // Validate clientId if provided

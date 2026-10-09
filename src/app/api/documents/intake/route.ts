@@ -92,19 +92,24 @@ export async function POST(req: NextRequest) {
   }
 
   // Also check by content hash alone (different path, same content)
-  const hashDuplicate = await prisma.sourceDocument.findFirst({
-    where: { contentHash: extracted.contentHash },
-    orderBy: { createdAt: 'desc' },
-  })
-  if (hashDuplicate) {
-    return NextResponse.json(
-      {
-        duplicate: true,
-        message: 'Document with identical content already exists',
-        existingDocumentId: hashDuplicate.id,
-      },
-      { status: 200 }
-    )
+  // Skip this check when text is empty — scanned/image PDFs all produce the same empty hash
+  // and would create false duplicates. Google Drive ID check above is sufficient for those.
+  const emptyExtraction = extracted.text.trim().length === 0
+  if (!emptyExtraction) {
+    const hashDuplicate = await prisma.sourceDocument.findFirst({
+      where: { contentHash: extracted.contentHash },
+      orderBy: { createdAt: 'desc' },
+    })
+    if (hashDuplicate) {
+      return NextResponse.json(
+        {
+          duplicate: true,
+          message: 'Document with identical content already exists',
+          existingDocumentId: hashDuplicate.id,
+        },
+        { status: 200 }
+      )
+    }
   }
 
   // ── Client matching ───────────────────────────────────────────────────────────
@@ -158,6 +163,9 @@ export async function POST(req: NextRequest) {
       status: 'RECEIVED',
       clientMatched: clientId !== null,
       extractedChars: extracted.text.length,
+      warning: emptyExtraction
+        ? 'No text was extracted — document may be image-based or encrypted. AI analysis will be skipped.'
+        : null,
       message: 'Document received and queued for analysis',
     },
     { status: 202 }
