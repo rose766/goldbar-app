@@ -54,6 +54,36 @@ export async function PATCH(
         }
       }
 
+      // Block approval if no linked openItem and no clientId — we cannot create an OpenItem
+      // without a valid client, and silently marking APPROVED with nothing created is a data integrity bug.
+      if (!reviewItem.openItemId && !proposedData.clientId) {
+        return NextResponse.json(
+          {
+            error:
+              'Cannot approve: no client was identified for this proposal. ' +
+              'Use Edit & Approve to supply a valid client ID, or Reject this proposal.',
+          },
+          { status: 422 }
+        )
+      }
+
+      // Re-validate clientId against the database (prevents stale or spoofed IDs from creating orphaned items)
+      if (!reviewItem.openItemId && proposedData.clientId) {
+        const clientExists = await prisma.client.findUnique({
+          where: { id: proposedData.clientId as string },
+          select: { id: true },
+        })
+        if (!clientExists) {
+          return NextResponse.json(
+            {
+              error: `Client ID "${proposedData.clientId}" not found in the database. ` +
+                'The client may have been removed. Use Edit & Approve to supply a valid client ID.',
+            },
+            { status: 422 }
+          )
+        }
+      }
+
       if (reviewItem.openItemId) {
         // Update existing OpenItem
         const existing = await prisma.openItem.findUnique({

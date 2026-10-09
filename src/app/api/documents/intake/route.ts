@@ -49,12 +49,35 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'fileBase64 is required' }, { status: 400 })
   }
 
+  // ── File type validation ──────────────────────────────────────────────────────
+  const SUPPORTED_TYPES = new Set(['pdf', 'docx', 'pptx', 'txt', 'md', 'markdown', 'text'])
+  const normalizedType = (fileType as string).toLowerCase().replace(/^\./, '')
+  if (!SUPPORTED_TYPES.has(normalizedType)) {
+    return NextResponse.json(
+      { error: `Unsupported file type: "${fileType}". Supported types: pdf, docx, pptx, txt, md` },
+      { status: 415 }
+    )
+  }
+
+  // ── File size guard (check base64 length before decoding) ─────────────────────
+  // base64 encodes 3 bytes as 4 chars, so a 10 MB file is ~13.7 MB in base64
+  const MAX_BASE64_LEN = Math.ceil(10 * 1024 * 1024 * 1.4)
+  if ((fileBase64 as string).length > MAX_BASE64_LEN) {
+    return NextResponse.json({ error: 'File too large (max 10 MB raw)' }, { status: 413 })
+  }
+
   // ── Decode file ───────────────────────────────────────────────────────────────
   let fileBuffer: Buffer
   try {
     fileBuffer = Buffer.from(fileBase64, 'base64')
   } catch {
     return NextResponse.json({ error: 'Invalid base64 in fileBase64' }, { status: 400 })
+  }
+
+  // Secondary size check on decoded bytes (belt-and-suspenders)
+  const MAX_BYTES = 10 * 1024 * 1024
+  if (fileBuffer.length > MAX_BYTES) {
+    return NextResponse.json({ error: 'File too large (max 10 MB)' }, { status: 413 })
   }
 
   // ── Extract text ──────────────────────────────────────────────────────────────
@@ -113,12 +136,23 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Client matching ───────────────────────────────────────────────────────────
+  // Require an unambiguous single match. Multiple matches = leave unmatched so AI flags CLIENT_NOT_FOUND.
   let clientId: string | null = null
   if (clientHint) {
     const clients = await prisma.client.findMany({ where: { status: 'ACTIVE' }, select: { id: true, name: true } })
-    const hint = clientHint.toLowerCase()
-    const match = clients.find((c) => c.name.toLowerCase().includes(hint) || hint.includes(c.name.toLowerCase()))
-    if (match) clientId = match.id
+    const hint = (clientHint as string).toLowerCase()
+    const matches = clients.filter(
+      (c) => c.name.toLowerCase().includes(hint) || hint.includes(c.name.toLowerCase())
+    )
+    if (matches.length === 1) {
+      clientId = matches[0].id
+    } else if (matches.length > 1) {
+      // Ambiguous — do not guess; let the AI flag CLIENT_NOT_FOUND for human review
+      console.warn(
+        `[intake] Ambiguous clientHint "${clientHint}" matched ${matches.length} clients: ` +
+        matches.map((c) => c.name).join(', ')
+      )
+    }
   }
 
   // ── Find previous version ─────────────────────────────────────────────────────

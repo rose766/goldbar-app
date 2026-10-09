@@ -270,6 +270,13 @@ export async function extractFromDocument(
   documentTitle: string,
   context: DocExtractionContext
 ): Promise<DocumentProposal[]> {
+  // Fail fast with a clear, actionable error rather than a cryptic API error
+  if (!process.env.ANTHROPIC_API_KEY) {
+    throw new Error(
+      'ANTHROPIC_API_KEY is not configured. Set this environment variable to enable AI extraction.'
+    )
+  }
+
   // Truncate if necessary
   const text = documentText.length > MAX_DOC_CHARS
     ? documentText.slice(0, MAX_DOC_CHARS) + '\n\n[Document truncated for analysis — full text stored]'
