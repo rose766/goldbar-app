@@ -32,12 +32,19 @@ function makeApiRequest(path: string, cookie?: string): NextRequest {
   })
 }
 
-function makeLoginRequest(password: unknown): NextRequest {
+function makeLoginRequest(password: unknown, ip?: string): NextRequest {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (ip) headers['x-forwarded-for'] = ip
   return new NextRequest('http://localhost/api/auth/login', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ password }),
   })
+}
+
+let ipCounter = 0
+function uniqueIp(): string {
+  return `10.0.0.${++ipCounter}`
 }
 
 // ─── constantTimeEqual ────────────────────────────────────────────────────────
@@ -240,6 +247,112 @@ describe('POST /api/auth/login', () => {
     // The cookie value should pass middleware
     const apiRes = middleware(makeApiRequest('/api/clients', cookieValue))
     expect(apiRes.status).toBe(200)
+  })
+})
+
+// ─── Rate limiting on POST /api/auth/login ───────────────────────────────────
+
+describe('POST /api/auth/login — rate limiting', () => {
+  beforeEach(() => {
+    process.env.DASHBOARD_PASSWORD = 'correct-password'
+    process.env.SESSION_SECRET = VALID_SECRET
+    process.env.COOKIE_SECURE = 'false'
+  })
+  afterEach(() => {
+    delete process.env.DASHBOARD_PASSWORD
+    delete process.env.SESSION_SECRET
+    delete process.env.COOKIE_SECURE
+  })
+
+  it('allows up to 5 failed attempts before blocking', async () => {
+    const ip = uniqueIp()
+    for (let i = 0; i < 5; i++) {
+      const res = await loginPOST(makeLoginRequest('wrong', ip))
+      expect(res.status).toBe(401)
+    }
+    // 6th attempt should be blocked
+    const res = await loginPOST(makeLoginRequest('wrong', ip))
+    expect(res.status).toBe(429)
+  })
+
+  it('returns 429 with Retry-After header when blocked', async () => {
+    const ip = uniqueIp()
+    for (let i = 0; i < 5; i++) {
+      await loginPOST(makeLoginRequest('wrong', ip))
+    }
+    const res = await loginPOST(makeLoginRequest('wrong', ip))
+    expect(res.status).toBe(429)
+    const retryAfter = res.headers.get('retry-after')
+    expect(retryAfter).not.toBeNull()
+    expect(Number(retryAfter)).toBeGreaterThan(0)
+  })
+
+  it('does not count a successful login as a failure', async () => {
+    const ip = uniqueIp()
+    for (let i = 0; i < 4; i++) {
+      await loginPOST(makeLoginRequest('wrong', ip))
+    }
+    // 5th attempt is correct — should succeed
+    const res = await loginPOST(makeLoginRequest('correct-password', ip))
+    expect(res.status).toBe(200)
+  })
+
+  it('clears the failure counter after a successful login', async () => {
+    const ip = uniqueIp()
+    for (let i = 0; i < 4; i++) {
+      await loginPOST(makeLoginRequest('wrong', ip))
+    }
+    // Successful login resets counter
+    await loginPOST(makeLoginRequest('correct-password', ip))
+    // Now 5 more failures should be allowed, not a block
+    for (let i = 0; i < 5; i++) {
+      const res = await loginPOST(makeLoginRequest('wrong', ip))
+      expect(res.status).toBe(401) // still allowed, not blocked yet
+    }
+  })
+
+  it('tracks rate limits per IP independently', async () => {
+    const ip1 = uniqueIp()
+    const ip2 = uniqueIp()
+    // Exhaust ip1
+    for (let i = 0; i < 5; i++) {
+      await loginPOST(makeLoginRequest('wrong', ip1))
+    }
+    // ip1 is blocked
+    expect((await loginPOST(makeLoginRequest('wrong', ip1))).status).toBe(429)
+    // ip2 is unaffected
+    expect((await loginPOST(makeLoginRequest('wrong', ip2))).status).toBe(401)
+  })
+
+  it('uses cf-connecting-ip header when present (Cloudflare)', async () => {
+    const cfIp = `10.1.${++ipCounter}.1`
+    const req = new NextRequest('http://localhost/api/auth/login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'cf-connecting-ip': cfIp,
+        'x-forwarded-for': '1.2.3.4', // should be ignored in favor of cf header
+      },
+      body: JSON.stringify({ password: 'wrong' }),
+    })
+    // Exhaust cfIp via cf-connecting-ip
+    for (let i = 0; i < 5; i++) {
+      const r = new NextRequest('http://localhost/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'cf-connecting-ip': cfIp },
+        body: JSON.stringify({ password: 'wrong' }),
+      })
+      await loginPOST(r)
+    }
+    const blocked = await loginPOST(req)
+    expect(blocked.status).toBe(429)
+    // x-forwarded-for IP (1.2.3.4) should still be unblocked
+    const xffReq = new NextRequest('http://localhost/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-forwarded-for': '1.2.3.4' },
+      body: JSON.stringify({ password: 'wrong' }),
+    })
+    expect((await loginPOST(xffReq)).status).toBe(401)
   })
 })
 
