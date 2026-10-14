@@ -2,6 +2,9 @@ export const dynamic = 'force-dynamic'
 
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { ASSESSMENT_QUESTIONS } from '@/lib/rh/assessment-questions'
+
+const QUESTION_MAP = new Map(ASSESSMENT_QUESTIONS.map(q => [q.key, q]))
 
 export async function GET(
   _request: NextRequest,
@@ -53,6 +56,9 @@ export async function PATCH(
 
     if (responses && Array.isArray(responses)) {
       for (const r of responses as ResponseInput[]) {
+        const qDef = QUESTION_MAP.get(r.questionKey)
+        const section = r.section ?? qDef?.section ?? 'A'
+        const questionText = r.questionText ?? qDef?.text ?? r.questionKey
         const existing = await prisma.rHAssessmentResponse.findFirst({
           where: { assessmentId: params.aid, questionKey: r.questionKey },
           select: { id: true },
@@ -61,8 +67,8 @@ export async function PATCH(
           await prisma.rHAssessmentResponse.update({
             where: { id: existing.id },
             data: {
-              section: r.section,
-              questionText: r.questionText,
+              section,
+              questionText,
               answer: r.answer,
               evidenceNote: r.evidenceNote ?? null,
               notes: r.notes ?? null,
@@ -73,9 +79,9 @@ export async function PATCH(
           await prisma.rHAssessmentResponse.create({
             data: {
               assessmentId: params.aid,
-              section: r.section,
+              section,
               questionKey: r.questionKey,
-              questionText: r.questionText,
+              questionText,
               answer: r.answer,
               evidenceNote: r.evidenceNote ?? null,
               notes: r.notes ?? null,

@@ -52,13 +52,13 @@ console.log('Records to restore:', {
 
 // Convert date strings back to Date objects for specified fields
 function dates<T extends Record<string, unknown>>(obj: T, fields: string[]): T {
-  const out = { ...obj }
+  const out = { ...obj } as Record<string, unknown>
   for (const f of fields) {
     if (typeof out[f] === 'string') {
-      out[f] = new Date(out[f] as string) as unknown as T[typeof f]
+      out[f] = new Date(out[f] as string)
     }
   }
-  return out
+  return out as T
 }
 
 // ─── Main restore ─────────────────────────────────────────────────────────────
