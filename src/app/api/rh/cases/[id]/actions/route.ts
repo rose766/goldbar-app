@@ -1,5 +1,23 @@
+export const dynamic = 'force-dynamic'
+
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const actions = await prisma.rHAction.findMany({
+      where: { caseId: params.id },
+      orderBy: [{ priority: 'desc' }, { createdAt: 'asc' }],
+    })
+    return NextResponse.json(actions)
+  } catch (error) {
+    console.error('Actions GET error:', error)
+    return NextResponse.json({ error: 'Failed to load actions' }, { status: 500 })
+  }
+}
 
 export async function POST(
   request: NextRequest,
@@ -7,43 +25,51 @@ export async function POST(
 ) {
   try {
     const body = await request.json()
-    const { title, description, assignedRole, assignedTo, dueDate, priority, taskOwner, followUpOwner } = body
+    const {
+      title,
+      description,
+      assignedRole,
+      assignedTo,
+      dueDate,
+      priority,
+      expectedResult,
+      createdBy,
+      relatedScenarioId,
+    } = body
 
-    if (!title || !assignedRole || !priority) {
-      return NextResponse.json({ error: 'title, assignedRole, and priority are required' }, { status: 400 })
+    if (!title || !assignedRole || !createdBy) {
+      return NextResponse.json(
+        { error: 'Missing required fields: title, assignedRole, createdBy' },
+        { status: 400 }
+      )
     }
 
-    const rhCase = await prisma.rHCase.findUnique({ where: { id: params.id } })
-    if (!rhCase) {
-      return NextResponse.json({ error: 'Case not found' }, { status: 404 })
-    }
-
-    // Generate action number
     const counter = await prisma.rHActionCounter.upsert({
       where: { id: 1 },
-      create: { id: 1, lastNum: 1 },
       update: { lastNum: { increment: 1 } },
+      create: { id: 1, lastNum: 1 },
     })
     const actionNumber = `A-${String(counter.lastNum).padStart(5, '0')}`
 
     const action = await prisma.rHAction.create({
       data: {
-        actionNumber,
         caseId: params.id,
+        actionNumber,
         title,
-        description: description || null,
+        description: description ?? null,
         assignedRole,
-        assignedTo: assignedTo || null,
+        assignedTo: assignedTo ?? null,
         dueDate: dueDate ? new Date(dueDate) : null,
-        priority,
-        status: 'NOT_STARTED',
-        createdBy: 'Rose',
+        priority: priority ?? 'MEDIUM',
+        expectedResult: expectedResult ?? null,
+        createdBy,
+        relatedScenarioId: relatedScenarioId ?? null,
       },
     })
 
     return NextResponse.json(action, { status: 201 })
-  } catch (err) {
-    console.error('[POST /api/rh/cases/[id]/actions]', err)
+  } catch (error) {
+    console.error('Actions POST error:', error)
     return NextResponse.json({ error: 'Failed to create action' }, { status: 500 })
   }
 }

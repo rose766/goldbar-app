@@ -1,5 +1,23 @@
+export const dynamic = 'force-dynamic'
+
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const evidence = await prisma.rHEvidence.findMany({
+      where: { caseId: params.id },
+      orderBy: { recordedAt: 'desc' },
+    })
+    return NextResponse.json(evidence)
+  } catch (error) {
+    console.error('Evidence GET error:', error)
+    return NextResponse.json({ error: 'Failed to load evidence' }, { status: 500 })
+  }
+}
 
 export async function POST(
   request: NextRequest,
@@ -7,15 +25,13 @@ export async function POST(
 ) {
   try {
     const body = await request.json()
-    const { title, description, sourceType, recordedBy, isConfirmed } = body
+    const { title, description, sourceType, recordedBy, isConfirmed, notes } = body
 
     if (!title || !description || !sourceType || !recordedBy) {
-      return NextResponse.json({ error: 'title, description, sourceType, and recordedBy are required' }, { status: 400 })
-    }
-
-    const rhCase = await prisma.rHCase.findUnique({ where: { id: params.id } })
-    if (!rhCase) {
-      return NextResponse.json({ error: 'Case not found' }, { status: 404 })
+      return NextResponse.json(
+        { error: 'Missing required fields: title, description, sourceType, recordedBy' },
+        { status: 400 }
+      )
     }
 
     const evidence = await prisma.rHEvidence.create({
@@ -26,23 +42,13 @@ export async function POST(
         sourceType,
         recordedBy,
         isConfirmed: isConfirmed ?? false,
-      },
-    })
-
-    await prisma.rHAuditLog.create({
-      data: {
-        caseId: params.id,
-        entityType: 'EVIDENCE',
-        entityId: evidence.id,
-        action: 'CREATE',
-        newValue: title,
-        changedBy: recordedBy,
+        notes: notes ?? null,
       },
     })
 
     return NextResponse.json(evidence, { status: 201 })
-  } catch (err) {
-    console.error('[POST /api/rh/cases/[id]/evidence]', err)
-    return NextResponse.json({ error: 'Failed to add evidence' }, { status: 500 })
+  } catch (error) {
+    console.error('Evidence POST error:', error)
+    return NextResponse.json({ error: 'Failed to create evidence' }, { status: 500 })
   }
 }
