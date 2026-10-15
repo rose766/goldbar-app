@@ -1,0 +1,30 @@
+# Railway deployment configuration for the Goldbar Command Center.
+# https://docs.railway.app/reference/config-as-code
+#
+# Railway setup (via dashboard at railway.app):
+#   1. New Project → Deploy from GitHub repo → select rose766/goldbar-app
+#   2. Set branch: claude/client-va-command-center-9ywvfg (or main after merge)
+#   3. Add a Volume: mount path /app/data, size 1 GB
+#   4. Set environment variables (Variables tab):
+#        DATABASE_URL     = file:/app/data/goldbar.db
+#        SESSION_SECRET   = <random 32+ char string>
+#        DASHBOARD_PASSWORD = <your password>
+#        COOKIE_SECURE    = true
+#        CURRENT_USER_NAME = Rose
+#   5. Railway auto-detects Node.js and runs build/start commands below.
+#
+# To restore existing data after first deploy:
+#   Use Railway's shell or CLI:
+#     railway run npx tsx prisma/restore.ts
+#   (requires restore-data.json to be present in /app/prisma/)
+
+[build]
+  builder = "NIXPACKS"
+  buildCommand = "npm ci && npx prisma generate && npm run build"
+
+[deploy]
+  startCommand = "sh scripts/docker-entrypoint.sh"
+  healthcheckPath = "/login"
+  healthcheckTimeout = 60
+  restartPolicyType = "ON_FAILURE"
+  restartPolicyMaxRetries = 5
