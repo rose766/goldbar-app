@@ -1,15 +1,34 @@
 # Fly.io deployment configuration for the Goldbar Command Center.
 # https://fly.io/docs/reference/configuration/
 #
-# First-time setup:
-#   fly launch --no-deploy        # creates app, sets app name below
-#   fly volumes create goldbar_data --size 1  # persistent SQLite storage
-#   fly secrets set SESSION_SECRET=... DASHBOARD_PASSWORD=... CURRENT_USER_NAME=Rose
-#   fly deploy
+# First-time setup (run from your local machine with the Fly CLI installed):
 #
-# To restore existing data after first deploy:
-#   fly ssh console -C "cd /app && DATABASE_URL=file:/app/data/goldbar.db node_modules/.bin/tsx prisma/restore.ts"
-#   (requires uploading restore-data.json to the container first via fly sftp)
+#   1. Register the app name (does NOT touch this file):
+#      fly apps create goldbar-command-center
+#      (if the name is taken, choose another and update the `app =` line below)
+#
+#   2. Create the persistent SQLite volume (underscore — must match source below):
+#      fly volumes create goldbar_data --region iad --size 1 --app goldbar-command-center
+#
+#   3. Set secrets — never committed to git:
+#      fly secrets set SESSION_SECRET="$(openssl rand -base64 32)" \
+#                       DASHBOARD_PASSWORD="<your-password>" \
+#                       CURRENT_USER_NAME="Rose" \
+#                       --app goldbar-command-center
+#
+#   4. Deploy:
+#      fly deploy
+#
+# To restore existing data after first deploy (volume starts empty):
+#   Step 1 — upload restore-data.json via SSH pipe (never commits the file):
+#     cat prisma/restore-data.json | fly ssh console \
+#       -C "cat > /app/prisma/restore-data.json" --app goldbar-command-center
+#   Step 2 — run the restore script:
+#     fly ssh console \
+#       -C "cd /app && node_modules/.bin/tsx prisma/restore.ts" \
+#       --app goldbar-command-center
+#   Step 3 — clean up the uploaded file from the container:
+#     fly ssh console -C "rm /app/prisma/restore-data.json" --app goldbar-command-center
 
 app = "goldbar-command-center"
 primary_region = "iad"
