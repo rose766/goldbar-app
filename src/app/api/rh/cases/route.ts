@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { getCurrentUser } from '@/lib/current-user'
 
 export async function GET(request: NextRequest) {
   try {
@@ -87,7 +88,6 @@ export async function POST(request: NextRequest) {
       vaId,
       assignedAm,
       assignedTrainer,
-      createdBy,
       title,
       description,
       severity,
@@ -98,9 +98,12 @@ export async function POST(request: NextRequest) {
       tags,
     } = body
 
-    if (!clientId || !assignedAm || !title || !description || !dateIdentified || !createdBy) {
+    // Attribution is always server-side — never trusted from the client body.
+    const createdBy = getCurrentUser()
+
+    if (!clientId || !assignedAm || !title || !description || !dateIdentified) {
       return NextResponse.json(
-        { error: 'Missing required fields: clientId, assignedAm, title, description, dateIdentified, createdBy' },
+        { error: 'Missing required fields: clientId, assignedAm, title, description, dateIdentified' },
         { status: 400 }
       )
     }

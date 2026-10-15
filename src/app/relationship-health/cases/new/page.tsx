@@ -74,7 +74,6 @@ export default function NewCasePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...form,
-          createdBy: 'Rose',
           dateIdentified: new Date(form.dateIdentified).toISOString(),
           nextReviewDate: form.nextReviewDate ? new Date(form.nextReviewDate).toISOString() : null,
           vaId: form.vaId || null,

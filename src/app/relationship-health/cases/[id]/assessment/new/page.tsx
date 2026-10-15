@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma'
 import { notFound, redirect } from 'next/navigation'
+import { getCurrentUser } from '@/lib/current-user'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,7 +21,7 @@ export default async function NewAssessmentPage({ params }: { params: { id: stri
       caseId: params.id,
       version,
       status: 'DRAFT',
-      assessedBy: 'Rose',
+      assessedBy: getCurrentUser(),
     },
   })
 
