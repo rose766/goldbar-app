@@ -19,11 +19,16 @@
 #   (requires restore-data.json to be present in /app/prisma/)
 
 [build]
-  builder = "NIXPACKS"
-  buildCommand = "npm ci && npx prisma generate && npm run build"
+  # Use the Dockerfile so the standalone bundle (server.js) is produced
+  # and the entrypoint script works correctly.
+  # Nixpacks would not produce .next/standalone/server.js, breaking startup.
+  builder = "DOCKERFILE"
+  dockerfilePath = "Dockerfile"
 
 [deploy]
-  startCommand = "sh scripts/docker-entrypoint.sh"
+  # docker-entrypoint.sh: runs prisma db push (idempotent), seeds 24 scenarios,
+  # then starts the standalone Next.js server via `node server.js`.
+  startCommand = "./docker-entrypoint.sh"
   healthcheckPath = "/login"
   healthcheckTimeout = 60
   restartPolicyType = "ON_FAILURE"

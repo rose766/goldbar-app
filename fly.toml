@@ -22,9 +22,11 @@ primary_region = "iad"
   COOKIE_SECURE = "true"
   DATABASE_URL = "file:/app/data/goldbar.db"
 
-[deploy]
-  # Runs before traffic is switched — safe because prisma db push is idempotent.
-  release_command = "node_modules/.bin/prisma db push --skip-generate && node_modules/.bin/tsx prisma/seed-scenarios.ts"
+# NOTE: No [deploy] release_command here.
+# Fly.io release commands run in a temporary container WITHOUT volumes mounted,
+# so a SQLite db push would target an ephemeral path and be discarded.
+# The docker-entrypoint.sh already runs prisma db push + seed-scenarios on
+# every startup against the real mounted volume at /app/data.
 
 [http_service]
   internal_port = 3000

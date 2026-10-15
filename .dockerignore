@@ -1,0 +1,36 @@
+# ── Secrets and confidential data ────────────────────────────────────────────
+# These must NEVER be baked into an image layer.
+.env
+.env.local
+.env*.local
+prisma/restore-data.json
+prisma/*.db
+prisma/*.db-journal
+prisma/*.backup*
+
+# ── Git and editor noise ──────────────────────────────────────────────────────
+.git
+.gitignore
+.gitattributes
+.editorconfig
+.vscode
+.idea
+
+# ── Build outputs (rebuilt inside Docker) ────────────────────────────────────
+.next
+node_modules
+
+# ── Test / dev artifacts ──────────────────────────────────────────────────────
+coverage
+__pycache__
+*.test.ts
+*.spec.ts
+src/__tests__
+
+# ── Misc ─────────────────────────────────────────────────────────────────────
+*.md
+Dockerfile*
+docker-compose*
+fly.toml
+railway.toml
+.dockerignore
